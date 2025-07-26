@@ -36,6 +36,22 @@ window.addEventListener('DOMContentLoaded', () => {
         // You can add logic here to fetch logs, etc.
     }
 
+    function showToast(message, type = 'success') {
+        const toast = document.createElement('div');
+        toast.className = `toast ${type}`;
+        toast.textContent = message;
+        document.body.appendChild(toast);
+        
+        // Trigger the animation
+        setTimeout(() => toast.classList.add('show'), 10);
+
+        // Hide and remove the toast after 4 seconds
+        setTimeout(() => {
+            toast.classList.remove('show');
+            toast.addEventListener('transitionend', () => toast.remove());
+        }, 4000);
+    }
+
     function showLogin() {
         authContainer.classList.remove('hidden');
         appContainer.classList.add('hidden');
@@ -87,6 +103,11 @@ window.addEventListener('DOMContentLoaded', () => {
         }
     });
 
+    socket.on('log_updated', () => {
+        console.log('Log update received from server, refreshing log list.');
+        fetchAndRenderLogs();
+    });
+
     // --- Form Event Listeners ---
     loginForm.addEventListener('submit', async (e) => {
         e.preventDefault();
@@ -101,6 +122,7 @@ window.addEventListener('DOMContentLoaded', () => {
             const data = await response.json();
             if (response.ok) {
                 showApp(username);
+                showToast('Login successful!', 'success');
             } else {
                 loginStatus.textContent = data.message || 'Login failed.';
             }
@@ -161,9 +183,9 @@ window.addEventListener('DOMContentLoaded', () => {
                 });
             }
             const result = await response.json();
-            displayStatus(result.message, response.ok ? 'success' : 'error');
+           showToast(result.message, response.ok ? 'success' : 'error');
         } catch (error) {
-            displayStatus('An unexpected error occurred.', 'error');
+            showToast('An unexpected error occurred.', 'error');
         } finally {
             submitButton.disabled = false;
             submitButton.textContent = 'Create Group';

@@ -2,10 +2,17 @@ const axios = require('axios');
 const logger = require('../utils/logger');
 const { readState, writeState } = require('../utils/stateManager');
 const { writeInviteLog } = require('../utils/inviteLogger');
-const config = require('../../config');
+
 
 const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 const getRandomDelay = (min, max) => Math.floor(Math.random() * (max - min + 1)) + min;
+
+function emitLogUpdated(username) {
+    if (global.io && global.userSockets?.[username]) {
+        global.io.to(global.userSockets[username]).emit('log_updated');
+        logger.info(`Emitted 'log_updated' event to user ${username}`);
+    }
+}
 
 async function createGroup(sock, username, groupName, participants, adminJid = null) {
     const state = readState();
@@ -64,7 +71,8 @@ async function createGroupWithBaileys(sock, username, groupName, participants, a
     const inviteLink = `https://chat.whatsapp.com/${inviteCode}`;
     
     writeInviteLog(username, groupName, inviteLink, 'Success (Baileys)');
-    
+    emitLogUpdated(username);
+
     const state = readState();
     state.createdGroups[groupName] = group.id;
     writeState(state);
@@ -100,6 +108,7 @@ async function createGroupWithGreenAPI(username, groupName, participants, adminJ
 
     const inviteLink = groupData.groupInviteLink;
     writeInviteLog(username, groupName, inviteLink, 'Success (Green-API)');
+    emitLogUpdated(username);
 
     const state = readState();
     state.createdGroups[groupName] = groupId;
