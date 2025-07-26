@@ -42,10 +42,7 @@ window.addEventListener('DOMContentLoaded', () => {
         toast.textContent = message;
         document.body.appendChild(toast);
         
-        // Trigger the animation
         setTimeout(() => toast.classList.add('show'), 10);
-
-        // Hide and remove the toast after 4 seconds
         setTimeout(() => {
             toast.classList.remove('show');
             toast.addEventListener('transitionend', () => toast.remove());
@@ -217,52 +214,42 @@ window.addEventListener('DOMContentLoaded', () => {
         try {
             const response = await fetch('/api/groups/list-logs');
             if (!response.ok) throw new Error('Failed to fetch logs');
-            
             const logs = await response.json();
-            logFileSelect.innerHTML = ''; // Clear existing options
+            logFileSelect.innerHTML = '';
 
             if (logs.length === 0) {
                 logFileSelect.innerHTML = '<option value="" disabled selected>No logs available yet</option>';
-                return;
+            } else {
+                logs.forEach(log => {
+                    const option = document.createElement('option');
+                    option.value = log.filename;
+                    option.textContent = log.display;
+                    logFileSelect.appendChild(option);
+                });
             }
-
-            logs.forEach(log => {
-                const option = document.createElement('option');
-                option.value = log.filename;
-                option.textContent = log.display;
-                logFileSelect.appendChild(option);
-            });
         } catch (error) {
             console.error('Error fetching logs:', error);
             logFileSelect.innerHTML = '<option value="" disabled selected>Error loading logs</option>';
         }
     }
 
-    /**
-     * Handles the download button click event.
-     */
+   // --- Log File Download Listener ---
     document.getElementById('download-invite-log-btn').addEventListener('click', () => {
         const selectedLogFile = document.getElementById('log-file-select').value;
         if (!selectedLogFile) {
-            alert('Please select a log file to download.');
+            showToast('Please select a log file to download.', 'error');
             return;
         }
-        // Create a temporary link to trigger the download
-        const link = document.createElement('a');
-        link.href = `/api/groups/download-log/${selectedLogFile}`;
-        link.download = selectedLogFile;
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
+        window.location.href = `/api/groups/download-log/${selectedLogFile}`;
     });
-    
+
     // --- Initial Load ---
     (async function checkInitialAuth() {
         const response = await fetch('/api/auth/check-auth');
         if (response.ok) {
             const { user } = await response.json();
             showApp(user.username);
-            fetchAndRenderLogs(); // Fetch logs right after showing the app
+            fetchAndRenderLogs(); // Fetch logs on initial load
         } else {
             showLogin();
         }

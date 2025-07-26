@@ -111,7 +111,6 @@ button:hover {
   margin-bottom: 10px;
 }
 
-/* Add this to your style.css or the <style> tag in index.html */
 .toast {
     position: fixed;
     bottom: 20px;

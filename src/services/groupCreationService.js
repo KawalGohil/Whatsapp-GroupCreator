@@ -41,29 +41,44 @@ async function createGroup(sock, username, groupName, participants, adminJid = n
 }
 
 async function createGroupWithBaileys(sock, username, groupName, participants, adminJid) {
+    const state = readState();
+    if (state.createdGroups[groupName]) {
+        logger.info(`Group "${groupName}" already exists. Skipping.`);
+        return;
+    }
+
     const confirmedParticipants = [];
-    // **FIX**: Loop through each participant and check them individually.
+    // **FIX**: This loop now correctly checks each number individually.
     for (const p of participants) {
         if (!p) continue;
+        // We check the number without the @s.whatsapp.net suffix
         const [result] = await sock.onWhatsApp(p.split('@')[0]);
         if (result?.exists) {
-            confirmedParticipants.push(result.jid); // Use the .jid property
+            confirmedParticipants.push(result.jid); // Use the JID from the result
         } else {
             logger.warn(`Number ${p} is not on WhatsApp. Skipping.`);
         }
     }
 
-    if (confirmedParticipants.length === 0) {
-        throw new Error('No valid WhatsApp users found.');
-    }
+    if (confirmedParticipants.length === 0) throw new Error('No valid WhatsApp users found.');
 
     const group = await sock.groupCreate(groupName, confirmedParticipants);
     logger.info(`Baileys: Group "${groupName}" created with ID: ${group.id}`);
 
-    if (adminJid && confirmedParticipants.includes(adminJid)) {
-        await delay(3000);
-        await sock.groupParticipantsUpdate(group.id, [adminJid], "promote");
-        logger.info(`Baileys: Promoted ${adminJid} to admin in group "${groupName}".`);
+    // **FIX & ENHANCED LOGGING**: This block now has better checks and logs for admin promotion.
+    if (adminJid) {
+        if (confirmedParticipants.includes(adminJid)) {
+            logger.info(`Attempting to promote ${adminJid} to admin...`);
+            await delay(3000); // Wait for group to settle
+            try {
+                await sock.groupParticipantsUpdate(group.id, [adminJid], "promote");
+                logger.info(`Successfully promoted ${adminJid} to admin in group "${groupName}".`);
+            } catch (e) {
+                logger.error(`Failed to promote admin ${adminJid}: ${e.message}`);
+            }
+        } else {
+            logger.warn(`Admin JID ${adminJid} was not in the final list of confirmed participants. Cannot promote.`);
+        }
     }
 
     await delay(2000);
@@ -71,9 +86,8 @@ async function createGroupWithBaileys(sock, username, groupName, participants, a
     const inviteLink = `https://chat.whatsapp.com/${inviteCode}`;
     
     writeInviteLog(username, groupName, inviteLink, 'Success (Baileys)');
-    emitLogUpdated(username);
-
-    const state = readState();
+    emitLogUpdated(username); // Notifies frontend to refresh logs
+    
     state.createdGroups[groupName] = group.id;
     writeState(state);
 }
