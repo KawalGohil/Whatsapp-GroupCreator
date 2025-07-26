@@ -81,7 +81,7 @@ window.addEventListener('DOMContentLoaded', () => {
     socket.on('status', (message) => {
         if (message.toLowerCase().includes('ready')) {
             displayStatus('Client is ready!', 'success');
-            qrcodeDiv.innerHTML = `<h3>✅ Client Ready</h3>`;
+            qrcodeDiv.innerHTML = `<h2>✅ Client Ready</h2>`;
         } else {
             displayStatus(message, 'info');
         }
@@ -190,12 +190,57 @@ window.addEventListener('DOMContentLoaded', () => {
         });
     });
 
+    async function fetchAndRenderLogs() {
+        const logFileSelect = document.getElementById('log-file-select');
+        try {
+            const response = await fetch('/api/groups/list-logs');
+            if (!response.ok) throw new Error('Failed to fetch logs');
+            
+            const logs = await response.json();
+            logFileSelect.innerHTML = ''; // Clear existing options
+
+            if (logs.length === 0) {
+                logFileSelect.innerHTML = '<option value="" disabled selected>No logs available yet</option>';
+                return;
+            }
+
+            logs.forEach(log => {
+                const option = document.createElement('option');
+                option.value = log.filename;
+                option.textContent = log.display;
+                logFileSelect.appendChild(option);
+            });
+        } catch (error) {
+            console.error('Error fetching logs:', error);
+            logFileSelect.innerHTML = '<option value="" disabled selected>Error loading logs</option>';
+        }
+    }
+
+    /**
+     * Handles the download button click event.
+     */
+    document.getElementById('download-invite-log-btn').addEventListener('click', () => {
+        const selectedLogFile = document.getElementById('log-file-select').value;
+        if (!selectedLogFile) {
+            alert('Please select a log file to download.');
+            return;
+        }
+        // Create a temporary link to trigger the download
+        const link = document.createElement('a');
+        link.href = `/api/groups/download-log/${selectedLogFile}`;
+        link.download = selectedLogFile;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+    });
+    
     // --- Initial Load ---
     (async function checkInitialAuth() {
         const response = await fetch('/api/auth/check-auth');
         if (response.ok) {
             const { user } = await response.json();
             showApp(user.username);
+            fetchAndRenderLogs(); // Fetch logs right after showing the app
         } else {
             showLogin();
         }
