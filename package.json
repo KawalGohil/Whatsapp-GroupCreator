@@ -1,0 +1,28 @@
+{
+  "name": "whatsapp-baileys-app",
+  "version": "1.0.0",
+  "description": "WhatsApp Group Automation with Baileys",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "@hapi/boom": "^10.0.1",
+    "@whiskeysockets/baileys": "^6.7.5",
+    "bcrypt": "^5.1.1",
+    "connect-sqlite3": "^0.9.13",
+    "csv-parser": "^3.0.0",
+    "dayjs": "^1.11.10",
+    "express": "^4.18.2",
+    "express-session": "^1.17.3",
+    "multer": "^1.4.5-lts.1",
+    "pino": "^8.15.0",
+    "pino-pretty": "^10.2.0",
+    "qrcode-terminal": "^0.12.0",
+    "socket.io": "^4.7.2",
+    "sqlite3": "^5.1.6",
+    "uuid": "^9.0.1"
+  }
+}
