@@ -1,0 +1,122 @@
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WhatsApp Group Creator</title>
+    <script src="/socket.io/socket.io.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.1/build/qrcode.min.js"></script>
+    <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; margin: 40px; background-color: #f0f2f5; color: #1c1e21; }
+        .container { max-width: 600px; margin: auto; background: #fff; padding: 20px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+        h1, h2 { text-align: center; color: #1877f2; }
+        .hidden { display: none !important; }
+        #qrcode { width: 256px; height: 256px; margin: 20px auto; border: 1px solid #ddd; padding: 10px; display: flex; flex-direction: column; align-items: center; justify-content: center; background: #fafbfc; box-sizing: border-box; aspect-ratio: 1 / 1; }
+        #qrcode canvas { max-width: 100%; max-height: 100%; width: 100% !important; height: auto !important; aspect-ratio: 1 / 1; display: block; }
+        .status-container { display: flex; flex-direction: column; align-items: center; justify-content: center; margin-top: 10px; }
+        .status-container h3, .status-container p { text-align: center; margin: 0.5em 0 0 0; }
+        #status { margin-top: 20px; text-align: center; font-weight: bold; color: #333; word-break: break-word; }
+        .auth-status { margin-top: 20px; text-align: center; font-weight: bold; color: #333; }
+        .auth-status.error { color: #d93025; }
+        form { display: flex; flex-direction: column; gap: 15px; }
+        input[type="text"], input[type="password"], input[type="file"] { padding: 10px; border-radius: 6px; border: 1px solid #ddd; font-size: 16px; }
+        button { padding: 12px; border-radius: 6px; border: none; background-color: #1877f2; color: white; font-size: 16px; font-weight: bold; cursor: pointer; }
+        button:hover { background-color: #166fe5; }
+        .auth-toggle { text-align: center; margin-top: 15px; color: #1877f2; cursor: pointer; }
+        #logout-button { background-color: #d93025; position: absolute; top: 20px; right: 20px; }
+
+        /* --- Responsive Styles --- */
+        @media (max-width: 600px) {
+            body { margin: 10px; }
+            .container { max-width: 100%; padding: 10px; border-radius: 0; box-shadow: none; }
+            #qrcode { width: 100%; max-width: 180px; height: auto; min-height: 120px; padding: 5px; }
+            #qrcode canvas { max-width: 100%; height: auto; }
+            .status-container { margin-top: 8px; }
+            #status { font-size: 1em; margin-top: 12px; }
+            input[type="text"], input[type="password"], input[type="file"], button { font-size: 15px; padding: 10px; }
+            h1 { font-size: 1.6em; }
+            h2 { font-size: 1.2em; }
+            #logout-button { position: static; width: 100%; margin-bottom: 10px; }
+        }
+        @media (max-width: 400px) {
+            #qrcode { max-width: 120px; min-width: 80px; min-height: 80px; aspect-ratio: 1 / 1; height: auto; }
+            #qrcode canvas { max-width: 100%; max-height: 100%; width: 100% !important; height: auto !important; aspect-ratio: 1 / 1; }
+            .status-container h3 { font-size: 1em; }
+            .status-container p { font-size: 0.95em; }
+            #status { font-size: 0.95em; }
+            button, input[type="text"], input[type="password"], input[type="file"] { font-size: 14px; padding: 8px; }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>WhatsApp Group Creator</h1>
+
+        <div id="auth-container">
+            <div id="login-view">
+                <h2>Login</h2>
+                <form id="login-form">
+                    <input type="text" id="login-username" placeholder="Username" required>
+                    <input type="password" id="login-password" placeholder="Password" required>
+                    <button type="submit">Login</button>
+                </form>
+                <div id="login-status" class="auth-status"></div>
+                <p class="auth-toggle" id="toggle-register">Don't have an account? Register</p>
+            </div>
+
+            <div id="register-view" class="hidden">
+                <h2>Register</h2>
+                <form id="register-form">
+                    <input type="text" id="register-username" placeholder="Username" required>
+                    <input type="password" id="register-password" placeholder="Password" required>                
+                    <button type="submit">Register</button>
+                </form>
+                <div id="register-status" class="auth-status"></div>
+                <p class="auth-toggle" id="toggle-login">Already have an account? Login</p>
+            </div>
+        </div>
+
+        <div id="app-container" class="hidden">
+            <button id="logout-button">Logout</button>
+            <div id="qrcode"></div>
+            <div id="status" class="info">Connecting to WhatsApp...</div>
+            <hr>
+            <h2>Create New Group</h2>
+            <form id="group-form">
+                <div id="input-mode-selector" style="margin-bottom: 10px; display: flex; gap: 20px;">
+                    <label><input type="radio" name="input-mode" value="manual" checked> Manual Entry</label>
+                    <label><input type="radio" name="input-mode" value="csv"> Upload CSV</label>
+                </div>
+
+                <div id="manual-input-section">
+                    <input type="text" id="groupName" placeholder="Enter Group Name" required>
+                    <textarea id="manualNumbers" placeholder="Enter phone numbers, one per line or comma-separated. Also add (91) before the number." rows="4" style="width: 100%; resize: vertical; margin-top: 10px;"></textarea>
+                    <input type="text" id="desiredAdminNumber" placeholder="Enter Desired Admin Number (optional)" style="margin-top: 10px;">
+                </div>
+
+                <div id="file-input-section" class="hidden">
+                    <input type="file" id="contacts" accept=".csv">
+                </div>
+
+                <button type="submit">Create Group</button>
+            </form>
+            <!-- ✅ Log dropdown shown only after login -->
+<h2 style="margin-top: 24px;">Download Invite Log</h2>
+<div id="download-section" style="margin-top: 10px;">
+    <select id="log-file-select" style="width: 100%; padding: 8px;">
+        <option value="" selected disabled>Loading session logs...</option>
+    </select>
+    <button id="download-invite-log-btn" style="margin-top: 8px; width: 100%;">Download Selected Log</button>
+    <div id="invite-log-message" style="margin-top: 10px; text-align: center;"></div>
+</div>
+<div id="upload-status-section" style="margin-top: 20px; display: none;">
+    <progress id="upload-progress-bar" value="0" max="1" style="width: 100%; height: 24px;"></progress>
+    <div id="upload-status-text" style="margin-top: 10px; text-align: center;"></div>
+</div>
+
+        </div>
+    </div>
+
+<script src="/app.js"></script>
+
+</body>
+</html>
