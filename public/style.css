@@ -29,6 +29,42 @@
     color: #666;
 }
 
+.client-ready-container {
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    height: 100%;
+    box-sizing: border-box;
+}
+
+.client-ready-icon {
+    font-size: 50px;
+    line-height: 1;
+    font-weight: bold;
+    color: white;
+    background-color: var(--success-color);
+    border-radius: 50%;
+    width: 80px;
+    height: 80px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin-bottom: 15px;
+}
+
+.client-ready-title {
+    font-size: 1.3em;
+    font-weight: bold;
+    color: var(--success-color);
+}
+
+.client-ready-subtitle {
+    font-size: 1em;
+    color: #555;
+    margin-top: 5px;
+}
+
 body {
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
     margin: 0;

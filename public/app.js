@@ -78,8 +78,9 @@ window.addEventListener('DOMContentLoaded', () => {
     socket.on('connect_error', (error) => console.error('Connection error:', error));
 
     socket.on('qr', (qr) => {
+        statusDiv.classList.remove('hidden'); // Ensure status text is visible for QR
         displayStatus('Scan QR code with WhatsApp', 'info');
-        qrcodeDiv.innerHTML = '';
+        qrcodeDiv.innerHTML = ''; // Clear previous content (like the 'Ready' message)
         const canvas = document.createElement('canvas');
         QRCode.toCanvas(canvas, qr, { width: 256 }, (err) => {
             if (err) {
@@ -91,26 +92,23 @@ window.addEventListener('DOMContentLoaded', () => {
         });
     });
 
+    // --- REPLACE THIS BLOCK ---
     socket.on('status', (message) => {
-    // Only update the main status text if the client is NOT ready.
-    if (!message.toLowerCase().includes('ready')) {
-        displayStatus(message, 'info');
-    } 
-    // If the client IS ready, update the QR code box instead.
-    else {
-        displayStatus('Client is ready!', 'success');
-        qrcodeDiv.innerHTML = `
-            <div class="status-ready-container">
-                <svg width="80" height="80" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                    <circle cx="12" cy="12" r="10" fill="#4CAF50"></circle>
-                    <path d="M8 12.3l2.7 2.7L16 9" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path>
-                </svg>
-                <h3>Client Ready</h3>
-                <p>You can now create groups.</p>
-            </div>
-        `;
-    }
-});
+        if (message.toLowerCase().includes('ready')) {
+            // Hide the text status element and show the visual "Ready" state in the main box.
+            statusDiv.classList.add('hidden');
+            qrcodeDiv.innerHTML = `
+                <div class="client-ready-container">
+                    <div class="client-ready-icon">✓</div>
+                    <div class="client-ready-title">Client Ready</div>
+                    <div class="client-ready-subtitle">You can now create groups.</div>
+                </div>`;
+        } else {
+            // For other statuses (like connecting), show the text status and ensure it's visible.
+            statusDiv.classList.remove('hidden');
+            displayStatus(message, 'info');
+        }
+    });
 
     socket.on('log_updated', () => {
         console.log('Log update received from server, refreshing log list.');
