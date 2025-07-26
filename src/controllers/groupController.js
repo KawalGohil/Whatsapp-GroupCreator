@@ -6,31 +6,25 @@ const { createGroup } = require('../services/groupCreationService');
 const logger = require('../utils/logger');
 const config = require('../../config');
 
-/**
- * NEW: Updated phone number sanitizer.
- * It now only removes non-digit characters and assumes the country code is already present.
- */
 const sanitizePhoneNumber = (num) => {
     if (!num) return null;
-    const cleaned = String(num).replace(/\D/g, ''); // Remove all non-digits
+    const cleaned = String(num).replace(/\D/g, '');
     return cleaned ? `${cleaned}@s.whatsapp.net` : null;
 };
 
+// --- No changes needed for manual group creation ---
 exports.createManualGroup = async (req, res) => {
-    const { groupName, numbers } = req.body;
+    const { groupName, numbers, desiredAdminNumber } = req.body;
     const username = req.session.user.username;
     const sock = getClient(username);
 
-    if (!sock) {
-        return res.status(400).json({ message: 'WhatsApp client not ready.' });
-    }
-    if (!groupName || !numbers) {
-        return res.status(400).json({ message: 'Group name and numbers are required.' });
-    }
+    if (!sock) return res.status(400).json({ message: 'WhatsApp client not ready.' });
+    if (!groupName || !numbers) return res.status(400).json({ message: 'Group name and numbers are required.' });
 
     try {
         const participants = numbers.split(/[,\n]/).map(sanitizePhoneNumber).filter(Boolean);
-        await createGroup(sock, username, groupName, participants);
+        const adminJid = sanitizePhoneNumber(desiredAdminNumber);
+        await createGroup(sock, username, groupName, participants, adminJid);
         res.status(200).json({ message: `Group "${groupName}" creation initiated.` });
     } catch (error) {
         logger.error(`Manual group creation failed for ${username}:`, error);
@@ -38,16 +32,13 @@ exports.createManualGroup = async (req, res) => {
     }
 };
 
+// Handle CSV file upload and process in the background
 exports.uploadContacts = (req, res) => {
     const username = req.session.user.username;
     const sock = getClient(username);
 
-    if (!sock) {
-        return res.status(400).json({ message: 'WhatsApp client not ready.' });
-    }
-    if (!req.file) {
-        return res.status(400).json({ message: 'CSV file is required.' });
-    }
+    if (!sock) return res.status(400).json({ message: 'WhatsApp client not ready.' });
+    if (!req.file) return res.status(400).json({ message: 'CSV file is required.' });
     
     res.status(202).json({ message: 'File uploaded. Processing will continue in the background.' });
     processCsvFile(req.file.path, sock, username);
@@ -88,9 +79,12 @@ async function processCsvFile(filePath, sock, username) {
                     }
                     
                     const uniqueParticipants = [...new Set(participants.filter(Boolean))];
+                    
+                    // NEW: Extract and sanitize the admin number
+                    const adminJid = sanitizePhoneNumber(row['admin number']?.trim());
 
                     if (uniqueParticipants.length > 0) {
-                        await createGroup(sock, username, groupName, uniqueParticipants);
+                        await createGroup(sock, username, groupName, uniqueParticipants, adminJid);
                         successCount++;
                     } else {
                         throw new Error('No valid participant numbers found in the row.');
@@ -110,7 +104,8 @@ async function processCsvFile(filePath, sock, username) {
         });
 }
 
-// --- Log File Management (No changes needed here) ---
+// --- Log File Management (Unchanged) ---
+// ... (listLogs and downloadLog functions remain the same)
 exports.listLogs = (req, res) => {
     const logDir = path.join(config.paths.data, 'invite-logs');
     const username = req.session.user.username;
