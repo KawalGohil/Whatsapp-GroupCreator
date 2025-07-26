@@ -1,85 +1,8 @@
 window.addEventListener('DOMContentLoaded', () => {
-    // Initialize Socket.IO client with explicit configuration
+    // Initialize Socket.IO client
     const socket = io({
         autoConnect: false,
         withCredentials: true,
-        // Use WebSocket transport first, fall back to polling if needed
-        transports: ['websocket', 'polling'],
-        // Important for Railway deployment
-        path: '/socket.io/'
-    });
-        
-    let currentUsername = null;
-        
-    // Debug logging for WebSocket connection
-    socket.on('connect', () => {
-        console.log('Connected to WebSocket server');
-    });
-        
-    socket.on('disconnect', (reason) => {
-        console.log('Disconnected:', reason);
-    });
-
-    socket.on('log_updated', () => {    
-    console.log('[CLIENT] New logs available.');
-    showInviteLogMsg('New invite log is available!', true);
-    fetchAndRenderLogs();
-    });
-
-    socket.on('upload_progress', ({ current, total, currentGroup, message }) => {
-    const bar = document.getElementById('upload-progress-bar');
-    const text = document.getElementById('upload-status-text');
-    const section = document.getElementById('upload-status-section');
-
-    if (bar && text && section) {
-        section.style.display = 'block';
-        bar.max = total;
-        bar.value = current;
-        text.textContent = `Processing: ${current}/${total} — Group: "${currentGroup}"`;
-    }
-    
-    // Display per-group status message if provided
-    if (message) {
-        showInviteLogMsg(message, !message.toLowerCase().includes('failed'));
-    }
-});
-
-socket.on('upload_complete', ({ successCount, failedCount, failedGroups }) => {
-    const bar = document.getElementById('upload-progress-bar');
-    const text = document.getElementById('upload-status-text');
-    
-    const finalMessage = `Upload complete. ${successCount} succeeded, ${failedCount} failed.`;
-    text.textContent = finalMessage;
-    bar.value = bar.max; // Fill the bar
-
-    showInviteLogMsg(finalMessage, failedCount === 0);
-
-    if (failedCount > 0) {
-        console.warn('[CLIENT] Group creation failed for:', failedGroups);
-    }
-
-    // Hide progress bar after a delay
-    setTimeout(() => {
-        document.getElementById('upload-status-section').style.display = 'none';
-    }, 5000);
-});
-
-socket.on('upload_aborted', ({ message, failedGroups }) => {
-    const statusEl = document.getElementById('upload-status-text');
-    statusEl.innerHTML = `${message}<br>Groups not created: ${failedGroups.map(g => g.groupName).join(', ')}`;
-
-    showInviteLogMsg(message, false);
-
-
-    
-    if (summary.failed.length > 0) {
-        console.warn('[CLIENT] Group creation failed for:', summary.failed);
-        }
-    });
-
-    
-    socket.on('connect_error', (error) => {
-        console.error('Connection error:', error);
     });
 
     // --- DOM Elements ---
@@ -97,412 +20,184 @@ socket.on('upload_aborted', ({ message, failedGroups }) => {
     const logoutButton = document.getElementById('logout-button');
     const manualInputSection = document.getElementById('manual-input-section');
     const fileInputSection = document.getElementById('file-input-section');
-    const manualNumbers = document.getElementById('manualNumbers');
     const groupNameInput = document.getElementById('groupName');
-    const toggleLoginLink = document.getElementById('toggle-login'); // Added
-    const toggleRegisterLink = document.getElementById('toggle-register'); // Added
     const contactsInput = document.getElementById('contacts');
-    const logFileSelect = document.getElementById('log-file-select');
-    const downloadLogButton = document.getElementById('download-invite-log-btn');
-    const inviteLogMessage = document.getElementById('invite-log-message');
+    const toggleLoginLink = document.getElementById('toggle-login');
+    const toggleRegisterLink = document.getElementById('toggle-register');
 
-    // --- Status Message Handling ---
+    // --- UI State Functions ---
+    function showApp(username) {
+        authContainer.classList.add('hidden');
+        appContainer.classList.remove('hidden');
+        displayStatus('Initializing session...', 'info');
+        if (!socket.connected) {
+            socket.connect();
+        }
+        // You can add logic here to fetch logs, etc.
+    }
+
+    function showLogin() {
+        authContainer.classList.remove('hidden');
+        appContainer.classList.add('hidden');
+        socket.disconnect();
+        loginForm.reset();
+        registerForm.reset();
+        loginStatus.textContent = '';
+        registerStatus.textContent = '';
+    }
+
     function displayStatus(message, type = 'info') {
         statusDiv.textContent = message;
-        statusDiv.className = `status ${type}`;  // Use CSS classes for styling
+        statusDiv.className = `status ${type}`;
     }
 
-    // Replace `populateLogFiles()` with this:
-async function fetchAndRenderLogs() {
-    const dropdown = document.getElementById('log-file-select'); // or 'logFileSelect'
-
-
-    if (!dropdown) {
-        console.warn('[fetchAndRenderLogs] Dropdown not found in DOM.');
-        return;
-    }
-
-    try {
-        const resp = await fetch('/list-logs');
-        const logs = await resp.json();
-
-        dropdown.innerHTML = '';
-
-        if (!logs.length) {
-            dropdown.innerHTML = '<option value="" disabled selected>No logs available</option>';
-            return;
-        }
-logs.forEach((log) => {
-    const opt = document.createElement('option');
-    opt.value = log.filename;      // for download
-    opt.textContent = log.display; // for display in dropdown
-    dropdown.appendChild(opt);
-});
-
-
-    } catch (err) {
-        console.error('[CLIENT] Failed to fetch log list:', err);
-    }
-}
-
-    // --- UI Logic ---  (moved up)
-    
-    document.querySelectorAll('input[name="input-mode"]').forEach(radio => {
-        radio.addEventListener('change', function() {
-            if (this.value === 'manual') {
-                manualInputSection.classList.remove('hidden');
-                fileInputSection.classList.add('hidden');
-                groupNameInput.required = true;
-                contactsInput.required = false;
-            } else {
-                manualInputSection.classList.add('hidden');
-                fileInputSection.classList.remove('hidden');
-                groupNameInput.required = false;
-                contactsInput.required = true;
-            }
-        });
-        });
-    
+    /**
+     * FIX #1: This function is now self-contained and robust.
+     */
     function toggleAuthView() {
-            const loginView = document.getElementById('login-view');
-            const registerView = document.getElementById('register-view');
-    
-            loginView.classList.toggle('hidden');
-            registerView.classList.toggle('hidden');
-        }
-
-        function showApp(username) {
-            // Clean up any existing state
-            qrcodeDiv.innerHTML = '';
-            displayStatus('Initializing session... Please wait.', 'info');
-            
-            // Disconnect any existing socket connection
-            if (socket.connected) {
-                socket.disconnect();
-            }
-            
-            // Clear any existing event listeners to prevent duplicates
-            socket.off('qr');
-            socket.off('authenticated');
-            socket.off('ready');
-            socket.off('disconnected');
-            socket.off('auth_failure');
-            
-            // Set up new connection
-            currentUsername = username;
-            socket.auth = { username };
-            
-            // Connect to the server
-            socket.connect();
-            
-            // Update UI
-            authContainer.classList.add('hidden');
-            appContainer.classList.remove('hidden');
-            
-            // Set up event listeners
-            setupSocketListeners();
-
-            // Fetch and populate log files
-            fetchAndRenderLogs();
-        }
-
-        function showLogin() {
-            currentUsername = null;
-            authContainer.classList.remove('hidden');
-            appContainer.classList.add('hidden');
-            socket.disconnect();
-
-            // Clear form fields for privacy and usability
-            loginForm.reset();
-            registerForm.reset();
-            loginStatus.textContent = '';
-            registerStatus.textContent = '';
-
-            // Reset app state as well to prevent flash of old content
-            qrcodeDiv.innerHTML = '';
-            statusDiv.textContent = 'Connecting to WhatsApp...';
-        }
-
-        // --- Group Form Event Listener ---
-        groupForm.addEventListener('submit', async (e) => {
-            e.preventDefault();
-            const mode = document.querySelector('input[name="input-mode"]:checked').value;
-            const submitButton = groupForm.querySelector('button[type="submit"]');
-            submitButton.disabled = true;
-            submitButton.textContent = 'Creating...';
-
-            try {
-                if (mode === 'manual') {
-                    const groupName = document.getElementById('groupName').value;
-                    const numbers = document.getElementById('manualNumbers').value;
-                    const desiredAdminNumber = document.getElementById('desiredAdminNumber').value;
-
-                    const response = await fetch('/create-group', {
-                        method: 'POST',
-                        headers: {
-                            'Content-Type': 'application/json',
-                        },
-                        body: JSON.stringify({ groupName, numbers, desiredAdminNumber }),
-                    });
-
-                    const result = await response.json();
-                    displayStatus(result.message || (response.ok ? 'Group creation initiated.' : 'Error creating group.'), response.ok ? 'success' : 'error');
-
-                } else { // CSV mode
-                    const formData = new FormData();
-                    const contactsFile = document.getElementById('contacts').files[0];
-                    if (!contactsFile) {
-                        displayStatus('Please select a CSV file.', 'error');
-                        return
-                    }
-                    formData.append('contacts', contactsFile);
-
-                    const response = await fetch('/upload', {
-                        method: 'POST',
-                        body: formData,
-                    });
-
-                    const result = await response.json();
-                    displayStatus(result.message || (response.ok ? 'CSV processing started.' : 'Error uploading file.'), response.ok ? 'success' : 'error');
-                }
-            } catch (error) {
-                console.error('Form submission error:', error);
-                displayStatus('An error occurred. Please try again.', 'error');
-            } finally {
-                submitButton.disabled = false;
-                submitButton.textContent = 'Create Group';
-                groupForm.reset(); // Reset form fields after submission
-                // Ensure manual is the default view after reset
-                document.querySelector('input[value="manual"]').dispatchEvent(new Event('change'));
-            }
-        });
-
-        loginForm.addEventListener('submit', async (e) => {
-            e.preventDefault();
-            const username = document.getElementById('login-username').value;
-            const password = document.getElementById('login-password').value;
-
-            try {
-                const response = await fetch('/login', {
-                    method: 'POST',
-                    credentials: 'include', // Important for cookies
-                    headers: {
-                        'Content-Type': 'application/json',
-                    },
-                    body: JSON.stringify({ username, password })
-                });
-
-                //
-                const data = await response.json().catch(() => ({}));
-                if (response.ok) {
-                    // The showApp function will handle the socket connection.
-                    showApp(username);
-                } else {
-                    loginStatus.textContent = data.error || 'Login failed.';
-                    loginStatus.className = 'auth-status error'; // Consistent error class
-                }
-            } catch (error) {
-                console.error('Login error:', error);
-                loginStatus.textContent = 'Error connecting to server: ' + error.message;; // Consistent error display
-                loginStatus.className = 'auth-status error';
-            }
-        });
-
-        registerForm.addEventListener('submit', async (e) => {
-            e.preventDefault();
-            const username = document.getElementById('register-username').value;
-            const password = document.getElementById('register-password').value;
-
-            try {
-                const response = await fetch('/register', {
-                    method: 'POST',
-                    credentials: 'include', // Important for cookies
-                    headers: {
-                        'Content-Type': 'application/json',
-                    },
-                    body: JSON.stringify({ username, password })
-                });
-
-                const data = await response.json().catch(() => ({}));
-                if (response.ok) {
-                    // Only show the app after registration is confirmed
-                    showApp(username);
-                    fetchAndRenderLogs();
-                } else {
-                    registerStatus.textContent = data.error || data.message || 'Registration failed.';
-                    registerStatus.className = 'auth-status error';
-                }
-            } catch (error) {
-                console.error('Registration error:', error);
-                registerStatus.textContent = 'Error connecting to server: ' + error.message;
-                registerStatus.className = 'auth-status error';
-            }
-        });
-
-        logoutButton.addEventListener('click', async () => {
-            try {
-                const response = await fetch('/logout', { 
-                    method: 'POST',
-                    credentials: 'include'
-                });
-                if (response.ok) {
-                    // Disconnect socket and clean up
-                    socket.disconnect();
-                    socket.off(); // Remove all event listeners
-
-                    // Wait for socket to fully disconnect before showing login
-                    await new Promise(resolve => {
-                        if (!socket.connected) return resolve();
-                        socket.once('disconnect', resolve);
-                    });
-
-                    // Reset UI
-                    showLogin();
-
-                    // Force a small delay before allowing re-login
-                    await new Promise(resolve => setTimeout(resolve, 500));
-                } else {
-                    const data = await response.json().catch(() => ({}));
-                    displayStatus(data.error || 'Logout failed.', 'error');
-                }
-            } catch (error) {
-                displayStatus('Error during logout: ' + error.message, 'error');
-                //statusDiv.className = 'status error'; // Remove direct class manipulation
-            }
-        });
-
-        // Set up socket event listeners
-        function setupSocketListeners() {
-            // Remove any existing listeners first to prevent duplicates
-            socket.off('qr');
-            socket.off('status');
-            socket.off('error');
-
-            // QR Code Handler
-            socket.on('qr', (qr) => {
-                // Clear any previous error states
-                statusDiv.className = 'status';
-                displayStatus('Scan this QR code with your WhatsApp to continue.', 'info');
-                
-                // Clear the QR code div and create a new canvas
-                qrcodeDiv.innerHTML = '';
-                const canvas = document.createElement('canvas');
-                
-                // Generate QR code with error handling
-                QRCode.toCanvas(canvas, qr, { 
-                    width: 256,
-                    margin: 2,
-                    color: {
-                        dark: '#000000',
-                        light: '#ffffff'
-                    }
-                }, (err) => {
-                    if (err) {
-                        console.error('Error generating QR code:', err);
-                        displayStatus('Error generating QR code. Please try again.', 'error');
-                        return;
-                    }
-                    qrcodeDiv.appendChild(canvas);
-                });
-            });
-
-            // Status Message Handler
-            socket.on('status', (message) => {
-                // Map technical errors to user-friendly messages
-                let userMessage = message;
-                if (message.includes('Could not start WhatsApp session')) {
-                    userMessage = 'We could not start your WhatsApp session. Please try again in a few seconds.';
-                } else if (message.includes('Authentication failed')) {
-                    userMessage = 'Authentication failed. Please try again.';
-                } else if (message.includes('Client disconnected')) {
-                    userMessage = 'Your WhatsApp session was disconnected. Please refresh and log in again.';
-                } else if (message.includes('Error') || message.includes('error') || message.includes('fail') || message.includes('Fail')) {
-                    userMessage = 'An error occurred. Please try again.'; // More user-friendly error
-                }
-                statusDiv.textContent = userMessage;
-                // Set appropriate status class based on message content
-                if (userMessage.includes('error') || userMessage.includes('Error') || 
-                    userMessage.includes('fail') || userMessage.includes('Fail') ||
-                    userMessage.includes('disconnected') || userMessage.includes('could not')) {
-                    statusDiv.className = 'status error';
-                } else if (userMessage.includes('ready')) {
-                    displayStatus('Client is ready!', 'success');
-                    qrcodeDiv.innerHTML = `
-                        <div class="status-container">
-                            <svg width="80" height="80" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                                <circle cx="12" cy="12" r="10" fill="#4CAF50"></circle>
-                                <path d="M8 12.3l2.7 2.7L16 9" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path>
-                            </svg>
-                            <h3>Client Ready</h3>
-                            <p>You can now create groups.</p>
-                        </div>`;
-                } else {
-                    displayStatus(userMessage, 'info')
-                }
-            });
-            
-            // Error Handler
-            socket.on('error', (error) => {
-                console.error('Socket error:', error);
-                statusDiv.className = 'status error';
-                displayStatus('Connection error. Please refresh the page and try again.', 'error');
-            });
-        }
-        
-        // Initialize socket listeners on page load
-        setupSocketListeners();
-
-        // Check login status on page load
-        (async function() {
-            const response = await fetch('/check-auth');
-            if (response.ok) {
-                const { user } = await response.json();
-                showApp(user.username);
-            } else {
-                showLogin();
-            }
-        })();
-        function showInviteLogMsg(msg, success=true) {
-            const msgDiv = document.getElementById('invite-log-message');
-            msgDiv.textContent = msg;
-            msgDiv.style.color = success ? '#219150' : '#d32f2f';
-        }
-
-// Download invite log handler
-document.getElementById('download-invite-log-btn').addEventListener('click', function () {
-    const selectedLogFile = logFileSelect.value;
-
-    if (!selectedLogFile) {
-        showInviteLogMsg('Please select a log file to download.', false);
-        return;
+        loginView.classList.toggle('hidden');
+        registerView.classList.toggle('hidden');
     }
 
-    fetch(`/download/invite-log/${selectedLogFile}`)
-        .then(response => {
-            if (response.ok) return response.blob();
-            else return response.json().then(x => {throw new Error(x.error || "Download failed");});
-        })
-        .then(blob => {
-            const url = window.URL.createObjectURL(blob);
-            const tempLink = document.createElement('a');
-            tempLink.href = url;
-            tempLink.download = `group-invite-log.csv`;
-            document.body.appendChild(tempLink);
-            tempLink.click();
-            document.body.removeChild(tempLink);
-            window.URL.revokeObjectURL(url);
-            showInviteLogMsg('Downloaded invite log successfully!');
-        })
-        .catch(err => {
-            showInviteLogMsg('No invite log available yet. Try again later. (' + err.message + ')', false);
+    // --- Socket Event Listeners ---
+    socket.on('connect', () => console.log('Connected to WebSocket server'));
+    socket.on('disconnect', (reason) => console.log('Disconnected:', reason));
+    socket.on('connect_error', (error) => console.error('Connection error:', error));
+
+    socket.on('qr', (qr) => {
+        displayStatus('Scan QR code with WhatsApp', 'info');
+        qrcodeDiv.innerHTML = '';
+        const canvas = document.createElement('canvas');
+        QRCode.toCanvas(canvas, qr, { width: 256 }, (err) => {
+            if (err) {
+                console.error('QR Code Error:', err);
+                displayStatus('Error generating QR code.', 'error');
+                return;
+            }
+            qrcodeDiv.appendChild(canvas);
         });
     });
 
-    // Attach event listener for toggling auth view
-    if (toggleRegisterLink)
-        toggleRegisterLink.addEventListener('click', toggleAuthView);
+    socket.on('status', (message) => {
+        if (message.toLowerCase().includes('ready')) {
+            displayStatus('Client is ready!', 'success');
+            qrcodeDiv.innerHTML = `<h3>✅ Client Ready</h3>`;
+        } else {
+            displayStatus(message, 'info');
+        }
+    });
 
-    // Attach event listener for toggling auth view
-    if (toggleLoginLink)
-        toggleLoginLink.addEventListener('click', toggleAuthView);
+    // --- Form Event Listeners ---
+    loginForm.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const username = loginForm.querySelector('#login-username').value;
+        const password = loginForm.querySelector('#login-password').value;
+        try {
+            const response = await fetch('/api/auth/login', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ username, password }),
+            });
+            const data = await response.json();
+            if (response.ok) {
+                showApp(username);
+            } else {
+                loginStatus.textContent = data.message || 'Login failed.';
+            }
+        } catch (error) {
+            loginStatus.textContent = 'Error connecting to server.';
+        }
+    });
+
+    registerForm.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const username = registerForm.querySelector('#register-username').value;
+        const password = registerForm.querySelector('#register-password').value;
+        try {
+            const response = await fetch('/api/auth/register', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ username, password }),
+            });
+            const data = await response.json();
+            if (response.ok) {
+                showApp(username);
+            } else {
+                registerStatus.textContent = data.message || 'Registration failed.';
+            }
+        } catch (error) {
+            registerStatus.textContent = 'Error connecting to server.';
+        }
+    });
+    
+    logoutButton.addEventListener('click', async () => {
+        await fetch('/api/auth/logout', { method: 'POST' });
+        showLogin();
+    });
+
+    groupForm.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const mode = groupForm.querySelector('input[name="input-mode"]:checked').value;
+        const submitButton = groupForm.querySelector('button[type="submit"]');
+        submitButton.disabled = true;
+        submitButton.textContent = 'Processing...';
+
+        try {
+            let response;
+            if (mode === 'manual') {
+                const groupName = groupNameInput.value;
+                const numbers = document.getElementById('manualNumbers').value;
+                response = await fetch('/api/groups/create-manual', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ groupName, numbers }),
+                });
+            } else { // CSV mode
+                const formData = new FormData();
+                formData.append('contacts', contactsInput.files[0]);
+                response = await fetch('/api/groups/upload-csv', {
+                    method: 'POST',
+                    body: formData,
+                });
+            }
+            const result = await response.json();
+            displayStatus(result.message, response.ok ? 'success' : 'error');
+        } catch (error) {
+            displayStatus('An unexpected error occurred.', 'error');
+        } finally {
+            submitButton.disabled = false;
+            submitButton.textContent = 'Create Group';
+            groupForm.reset();
+        }
+    });
+
+    // Event listeners for toggling views
+    toggleRegisterLink.addEventListener('click', toggleAuthView);
+    toggleLoginLink.addEventListener('click', toggleAuthView);
+
+    /**
+     * FIX #2: This listener now correctly manages the `required` attribute.
+     */
+    document.querySelectorAll('input[name="input-mode"]').forEach(radio => {
+        radio.addEventListener('change', function() {
+            const isManual = this.value === 'manual';
+            manualInputSection.classList.toggle('hidden', !isManual);
+            fileInputSection.classList.toggle('hidden', isManual);
+            
+            // Update required attributes to prevent form errors
+            groupNameInput.required = isManual;
+            contactsInput.required = !isManual;
+        });
+    });
+
+    // --- Initial Load ---
+    (async function checkInitialAuth() {
+        const response = await fetch('/api/auth/check-auth');
+        if (response.ok) {
+            const { user } = await response.json();
+            showApp(user.username);
+        } else {
+            showLogin();
+        }
+    })();
 });

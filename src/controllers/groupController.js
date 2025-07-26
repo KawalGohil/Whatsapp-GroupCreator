@@ -2,11 +2,20 @@ const fs = require('fs');
 const path = require('path');
 const csv = require('csv-parser');
 const { getClient } = require('../services/whatsappService');
-const { createGroup } = require('../services/groupCreationService'); // We will create this new service
+const { createGroup } = require('../services/groupCreationService');
 const logger = require('../utils/logger');
 const config = require('../../config');
 
-// Create a group from manual input
+/**
+ * NEW: Updated phone number sanitizer.
+ * It now only removes non-digit characters and assumes the country code is already present.
+ */
+const sanitizePhoneNumber = (num) => {
+    if (!num) return null;
+    const cleaned = String(num).replace(/\D/g, ''); // Remove all non-digits
+    return cleaned ? `${cleaned}@s.whatsapp.net` : null;
+};
+
 exports.createManualGroup = async (req, res) => {
     const { groupName, numbers } = req.body;
     const username = req.session.user.username;
@@ -20,7 +29,7 @@ exports.createManualGroup = async (req, res) => {
     }
 
     try {
-        const participants = numbers.split(/[,\n]/).map(num => `${num.replace(/\D/g, '')}@s.whatsapp.net`);
+        const participants = numbers.split(/[,\n]/).map(sanitizePhoneNumber).filter(Boolean);
         await createGroup(sock, username, groupName, participants);
         res.status(200).json({ message: `Group "${groupName}" creation initiated.` });
     } catch (error) {
@@ -29,7 +38,6 @@ exports.createManualGroup = async (req, res) => {
     }
 };
 
-// Handle CSV file upload and process in the background
 exports.uploadContacts = (req, res) => {
     const username = req.session.user.username;
     const sock = getClient(username);
@@ -41,10 +49,7 @@ exports.uploadContacts = (req, res) => {
         return res.status(400).json({ message: 'CSV file is required.' });
     }
     
-    // Respond immediately to the client
     res.status(202).json({ message: 'File uploaded. Processing will continue in the background.' });
-
-    // Process the CSV in the background
     processCsvFile(req.file.path, sock, username);
 };
 
@@ -54,35 +59,96 @@ async function processCsvFile(filePath, sock, username) {
         .pipe(csv())
         .on('data', (data) => rows.push(data))
         .on('end', async () => {
-            fs.unlinkSync(filePath); // Clean up the uploaded file
-            logger.info(`Processing ${rows.length} groups from CSV for user ${username}.`);
+            fs.unlinkSync(filePath);
+            logger.info(`Processing ${rows.length} rows from CSV for user ${username}.`);
+
+            let successCount = 0;
+            let failedCount = 0;
 
             for (const [index, row] of rows.entries()) {
+                let groupName;
                 try {
-                    // Adapt this logic to match your CSV headers
-                    const groupName = row['Group Name'];
-                    const participants = row['Participants'].split(',').map(num => `${num.trim()}@s.whatsapp.net`);
-                    
-                    if (groupName && participants.length > 0) {
-                        await createGroup(sock, username, groupName, participants);
+                    const bookingId = row['Booking ID']?.trim();
+                    const propertyName = row['property name']?.trim();
+                    const checkIn = row['check-in']?.trim();
+
+                    if (!bookingId || !propertyName || !checkIn) {
+                        throw new Error('Row is missing required fields for group name.');
                     }
-                    // Notify frontend of progress
-                    global.io.to(global.userSockets[username]).emit('upload_progress', { current: index + 1, total: rows.length, currentGroup: groupName });
+                    groupName = `${bookingId} - ${propertyName} - ${checkIn}`;
+
+                    const participants = [];
+                    for (const key in row) {
+                        if (key.toLowerCase().includes('number') || key.toLowerCase().includes('contact')) {
+                            const phoneValue = row[key]?.trim();
+                            if (phoneValue) {
+                                participants.push(sanitizePhoneNumber(phoneValue));
+                            }
+                        }
+                    }
+                    
+                    const uniqueParticipants = [...new Set(participants.filter(Boolean))];
+
+                    if (uniqueParticipants.length > 0) {
+                        await createGroup(sock, username, groupName, uniqueParticipants);
+                        successCount++;
+                    } else {
+                        throw new Error('No valid participant numbers found in the row.');
+                    }
+                    
+                    global.io.to(global.userSockets[username]).emit('upload_progress', { current: index + 1, total: rows.length, currentGroup: groupName, message: `Successfully processed: ${groupName}` });
 
                 } catch (error) {
-                    logger.error(`Failed to process row ${index + 1} for ${username}:`, error);
+                    failedCount++;
+                    const errorMessage = `Failed to process row ${index + 1} (${groupName || 'Unknown Group'}): ${error.message}`;
+                    logger.error(errorMessage);
+                    global.io.to(global.userSockets[username]).emit('upload_progress', { current: index + 1, total: rows.length, currentGroup: groupName || 'Unknown', message: errorMessage });
                 }
             }
-            global.io.to(global.userSockets[username]).emit('upload_complete', { successCount: rows.length, failedCount: 0 }); // Simplified for now
+            
+            global.io.to(global.userSockets[username]).emit('upload_complete', { successCount, failedCount });
         });
 }
 
-// --- Log File Management ---
-// (These can be copied from your previous project, just ensure paths are correct)
+// --- Log File Management (No changes needed here) ---
 exports.listLogs = (req, res) => {
-    // ... logic to read and list files from the invite-logs directory ...
+    const logDir = path.join(config.paths.data, 'invite-logs');
+    const username = req.session.user.username;
+
+    fs.readdir(logDir, (err, files) => {
+        if (err) {
+            if (err.code === 'ENOENT') return res.status(200).json([]);
+            logger.error(`Error reading log directory for ${username}:`, err);
+            return res.status(500).json({ message: 'Could not list log files.' });
+        }
+
+        const userLogs = files
+            .filter(file => file.startsWith(`group_invite_log_${username}_`) && file.endsWith('.csv'))
+            .map(file => {
+                const dateStr = file.replace(`group_invite_log_${username}_`, '').replace('.csv', '');
+                return { filename: file, display: `Log for ${dateStr}` };
+            })
+            .sort((a, b) => b.display.localeCompare(a.display));
+
+        res.status(200).json(userLogs);
+    });
 };
 
 exports.downloadLog = (req, res) => {
-    // ... logic to download a specific log file ...
+    const logDir = path.join(config.paths.data, 'invite-logs');
+    const { filename } = req.params;
+    const username = req.session.user.username;
+
+    if (!filename.startsWith(`group_invite_log_${username}`)) {
+        logger.warn(`Unauthorized download attempt by ${username} for ${filename}`);
+        return res.status(403).json({ message: 'Forbidden' });
+    }
+
+    const logPath = path.join(logDir, filename);
+
+    if (fs.existsSync(logPath)) {
+        res.download(logPath, filename);
+    } else {
+        res.status(404).json({ message: 'Log file not found.' });
+    }
 };

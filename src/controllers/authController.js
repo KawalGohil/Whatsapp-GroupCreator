@@ -11,15 +11,24 @@ exports.register = (req, res) => {
 
     userModel.createUser(username, password, (err, user) => {
         if (err) {
+            // This is the key fix: Send a specific error message for duplicate usernames
+            if (err.message.includes('Username already exists')) {
+                return res.status(409).json({ message: 'Username is already taken. Please choose another.' });
+            }
             logger.error('Registration error:', err);
-            return res.status(409).json({ message: err.message });
+            return res.status(500).json({ message: 'An internal server error occurred.' });
         }
+        
         req.session.user = { id: user.id, username: user.username };
         logger.info(`User ${username} registered and logged in.`);
+        
         startBaileysClient(username);
+        
         res.status(201).json({ message: 'Registration successful.' });
     });
 };
+
+// --- No changes to the functions below ---
 
 // User Login
 exports.login = (req, res) => {
@@ -46,7 +55,6 @@ exports.login = (req, res) => {
 
 // User Logout
 exports.logout = (req, res) => {
-    // Note: Baileys client cleanup is handled in whatsappService on 'loggedOut' event
     req.session.destroy(err => {
         if (err) {
             logger.error('Error destroying session:', err);
