@@ -8,22 +8,17 @@ const config = require('../../config');
 
 const sanitizePhoneNumber = (num) => {
     if (!num) return null;
-    // Remove all non-digit characters
-    const cleaned = String(num).replace(/\D/g, '');
+    // Convert from scientific notation and remove all non-digit characters
+    const cleaned = String(Number(num)).replace(/\D/g, '');
     
-    // Check if the number already has a country code (is longer than 10 digits)
-    if (cleaned.length > 10) {
+    // If the number is valid (10 digits or more), format it.
+    if (cleaned.length >= 10) {
         return `${cleaned}@s.whatsapp.net`;
-    } 
-    // If it's a 10-digit number, assume it's Indian and add the prefix
-    else if (cleaned.length === 10) {
-        return `91${cleaned}@s.whatsapp.net`;
-    }
+    }    
     // Otherwise, the number is invalid
-    else {
-        return null;
-    }
+    return null;
 };
+
 
 // --- Manual Group Creation (No changes needed) ---
 exports.createManualGroup = async (req, res) => {

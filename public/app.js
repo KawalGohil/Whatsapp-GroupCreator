@@ -92,13 +92,25 @@ window.addEventListener('DOMContentLoaded', () => {
     });
 
     socket.on('status', (message) => {
-        if (message.toLowerCase().includes('ready')) {
-            displayStatus('Client is ready!', 'success');
-            qrcodeDiv.innerHTML = `<h2>✅ Client Ready</h2>`;
-        } else {
-            displayStatus(message, 'info');
-        }
-    });
+    // Only update the main status text if the client is NOT ready.
+    if (!message.toLowerCase().includes('ready')) {
+        displayStatus(message, 'info');
+    } 
+    // If the client IS ready, update the QR code box instead.
+    else {
+        displayStatus('Client is ready!', 'success');
+        qrcodeDiv.innerHTML = `
+            <div class="status-ready-container">
+                <svg width="80" height="80" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <circle cx="12" cy="12" r="10" fill="#4CAF50"></circle>
+                    <path d="M8 12.3l2.7 2.7L16 9" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path>
+                </svg>
+                <h3>Client Ready</h3>
+                <p>You can now create groups.</p>
+            </div>
+        `;
+    }
+});
 
     socket.on('log_updated', () => {
         console.log('Log update received from server, refreshing log list.');
