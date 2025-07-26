@@ -11,10 +11,18 @@ async function createGroup(sock, username, groupName, participants) {
         logger.info(`Group "${groupName}" already exists. Skipping.`);
         return;
     }
-    
-    // 1. Validate numbers with Baileys to see if they are on WhatsApp
-    const onWhatsApp = await sock.onWhatsApp(participants);
-    const confirmedParticipants = onWhatsApp.filter(p => p.exists).map(p => p.jid);
+
+    // **FIX**: The onWhatsApp function takes a single phone number string, not an array.
+    // We need to check each participant individually.
+    const confirmedParticipants = [];
+    for (const p of participants) {
+        const [result] = await sock.onWhatsApp(p);
+        if (result?.exists) {
+            confirmedParticipants.push(result.jid); // We use the jid property from the result object
+        } else {
+            logger.warn(`Number ${p} is not on WhatsApp. Skipping.`);
+        }
+    }
 
     if (confirmedParticipants.length === 0) {
         throw new Error('No valid WhatsApp users found in the provided list.');
