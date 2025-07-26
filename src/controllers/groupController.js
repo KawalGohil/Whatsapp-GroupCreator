@@ -46,8 +46,9 @@ exports.uploadContacts = (req, res) => {
 
 async function processCsvFile(filePath, sock, username) {
     const rows = [];
+    // **FIX**: Map headers to lowercase to make matching case-insensitive
     fs.createReadStream(filePath)
-        .pipe(csv())
+        .pipe(csv({ mapHeaders: ({ header }) => header.toLowerCase() }))
         .on('data', (data) => rows.push(data))
         .on('end', async () => {
             fs.unlinkSync(filePath);
@@ -59,7 +60,8 @@ async function processCsvFile(filePath, sock, username) {
             for (const [index, row] of rows.entries()) {
                 let groupName;
                 try {
-                    const bookingId = row['Booking ID']?.trim();
+                    // **FIX**: Use lowercase headers for lookup
+                    const bookingId = row['booking id']?.trim();
                     const propertyName = row['property name']?.trim();
                     const checkIn = row['check-in']?.trim();
 
@@ -70,6 +72,7 @@ async function processCsvFile(filePath, sock, username) {
 
                     const participants = [];
                     for (const key in row) {
+                        // This logic remains the same as it's already lowercase
                         if (key.toLowerCase().includes('number') || key.toLowerCase().includes('contact')) {
                             const phoneValue = row[key]?.trim();
                             if (phoneValue) {
@@ -79,8 +82,6 @@ async function processCsvFile(filePath, sock, username) {
                     }
                     
                     const uniqueParticipants = [...new Set(participants.filter(Boolean))];
-                    
-                    // NEW: Extract and sanitize the admin number
                     const adminJid = sanitizePhoneNumber(row['admin number']?.trim());
 
                     if (uniqueParticipants.length > 0) {
@@ -103,6 +104,7 @@ async function processCsvFile(filePath, sock, username) {
             global.io.to(global.userSockets[username]).emit('upload_complete', { successCount, failedCount });
         });
 }
+
 
 // --- Log File Management (Unchanged) ---
 // ... (listLogs and downloadLog functions remain the same)
