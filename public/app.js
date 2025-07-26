@@ -52,11 +52,18 @@ window.addEventListener('DOMContentLoaded', () => {
     function showLogin() {
         authContainer.classList.remove('hidden');
         appContainer.classList.add('hidden');
-        socket.disconnect();
+        if (socket.connected) {
+            socket.disconnect();
+        }
         loginForm.reset();
         registerForm.reset();
         loginStatus.textContent = '';
         registerStatus.textContent = '';
+
+        // --- Add these lines to fully reset the UI state ---
+        qrcodeDiv.innerHTML = '';
+        statusDiv.classList.remove('hidden');
+        displayStatus('Connecting to WhatsApp...', 'info');
     }
 
     function displayStatus(message, type = 'info') {
@@ -118,6 +125,7 @@ window.addEventListener('DOMContentLoaded', () => {
     // --- Form Event Listeners ---
     loginForm.addEventListener('submit', async (e) => {
         e.preventDefault();
+        showLogin(); 
         const username = loginForm.querySelector('#login-username').value;
         const password = loginForm.querySelector('#login-password').value;
         try {
@@ -164,6 +172,7 @@ window.addEventListener('DOMContentLoaded', () => {
         showLogin();
     });
 
+    // --- Find this event listener ---
     groupForm.addEventListener('submit', async (e) => {
         e.preventDefault();
         const mode = groupForm.querySelector('input[name="input-mode"]:checked').value;
@@ -171,15 +180,20 @@ window.addEventListener('DOMContentLoaded', () => {
         submitButton.disabled = true;
         submitButton.textContent = 'Processing...';
 
+        // --- Add this line to disable the whole form ---
+        groupForm.querySelectorAll('input, textarea').forEach(el => el.disabled = true);
+
         try {
             let response;
             if (mode === 'manual') {
-                const groupName = groupNameInput.value;
+                const groupName = document.getElementById('groupName').value;
                 const numbers = document.getElementById('manualNumbers').value;
+                const desiredAdminNumber = document.getElementById('desiredAdminNumber').value;
+                
                 response = await fetch('/api/groups/create-manual', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ groupName, numbers }),
+                    body: JSON.stringify({ groupName, numbers, desiredAdminNumber }),
                 });
             } else { // CSV mode
                 const formData = new FormData();
@@ -190,13 +204,23 @@ window.addEventListener('DOMContentLoaded', () => {
                 });
             }
             const result = await response.json();
-           showToast(result.message, response.ok ? 'success' : 'error');
+            showToast(result.message, response.ok ? 'success' : 'error');
         } catch (error) {
             showToast('An unexpected error occurred.', 'error');
         } finally {
             submitButton.disabled = false;
             submitButton.textContent = 'Create Group';
-            groupForm.reset();
+            
+            // --- Replace groupForm.reset() with manual field clearing ---
+            if (mode === 'manual') {
+                document.getElementById('groupName').value = '';
+                document.getElementById('manualNumbers').value = '';
+                document.getElementById('desiredAdminNumber').value = '';
+            } else {
+                document.getElementById('contacts').value = ''; // Only clear the file input
+            }
+            // --- Re-enable the form ---
+            groupForm.querySelectorAll('input, textarea').forEach(el => el.disabled = false);
         }
     });
 

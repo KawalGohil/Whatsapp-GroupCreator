@@ -1,5 +1,5 @@
 const userModel = require('../models/userModel');
-const { startBaileysClient, getClient } = require('../services/whatsappService');
+const { startBaileysClient, getClient, closeBaileysClient } = require('../services/whatsappService');
 const logger = require('../utils/logger');
 
 // User Registration
@@ -55,16 +55,35 @@ exports.login = (req, res) => {
 
 // User Logout
 exports.logout = (req, res) => {
+    const username = req.session.user?.username;
+
     req.session.destroy(err => {
         if (err) {
             logger.error('Error destroying session:', err);
             return res.status(500).json({ message: 'Logout failed.' });
         }
+        
+        if (username) {
+            closeBaileysClient(username);
+            const socketId = global.userSockets?.[username];
+            if (socketId && global.io) {
+                // --- THIS IS THE FIX ---
+                // Get the socket instance from the server's list of connected sockets and then disconnect it.
+                const socket = global.io.sockets.sockets.get(socketId);
+                if (socket) {
+                    socket.disconnect(true);
+                }
+                // --- END OF FIX ---
+                delete global.userSockets[username];
+            }
+        }
+
         res.clearCookie('connect.sid');
-        logger.info(`User logged out.`);
+        logger.info(`User ${username || ''} logged out.`);
         res.status(200).json({ message: 'Logged out successfully.' });
     });
 };
+
 
 // Check Authentication Status
 exports.checkAuth = (req, res) => {

@@ -147,12 +147,12 @@ hr {
     font-size: 0.9em;
 }
 
-/* App Section */
 #session-status {
     display: flex;
+    flex-direction: column; /* Change from row to column */
     justify-content: center;
     align-items: center;
-    gap: 30px;
+    gap: 15px; /* Reduced gap for vertical layout */
     padding: 20px;
     background-color: #fafafa;
     border-radius: 8px;

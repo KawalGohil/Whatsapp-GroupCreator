@@ -60,6 +60,22 @@ function getClient(clientId) {
     return clients[clientId];
 }
 
+function closeBaileysClient(clientId) {
+    const sock = clients[clientId];
+    if (sock) {
+        logger.info(`Closing Baileys client for ${clientId}.`);
+        sock.logout(); // This gracefully closes the connection
+        delete clients[clientId];
+
+        // Optional: Clean up session files on logout
+        const sessionDir = path.join(config.paths.session, clientId);
+        if (fs.existsSync(sessionDir)) {
+            fs.rmSync(sessionDir, { recursive: true, force: true });
+            logger.info(`Removed session directory for ${clientId}.`);
+        }
+    }
+}
+
 // This function can be expanded later to automatically restart sessions on server startup
 function initializeWhatsAppClients() {
     logger.info('WhatsApp service initialized.');
@@ -68,5 +84,6 @@ function initializeWhatsAppClients() {
 module.exports = {
     startBaileysClient,
     getClient,
+    closeBaileysClient,
     initializeWhatsAppClients,
 };
