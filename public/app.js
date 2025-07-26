@@ -24,6 +24,9 @@ window.addEventListener('DOMContentLoaded', () => {
     const contactsInput = document.getElementById('contacts');
     const toggleLoginLink = document.getElementById('toggle-login');
     const toggleRegisterLink = document.getElementById('toggle-register');
+    const uploadStatusSection = document.getElementById('upload-status-section');
+    const uploadStatusText = document.getElementById('upload-status-text');
+    let progressState = {}; // To store timing information
 
     // --- UI State Functions ---
     function showApp(username) {
@@ -84,12 +87,14 @@ window.addEventListener('DOMContentLoaded', () => {
     socket.on('disconnect', (reason) => console.log('Disconnected:', reason));
     socket.on('connect_error', (error) => console.error('Connection error:', error));
 
-    socket.on('qr', (qr) => {
+     socket.on('qr', (qr) => {
         statusDiv.classList.remove('hidden'); // Ensure status text is visible for QR
         displayStatus('Scan QR code with WhatsApp', 'info');
         qrcodeDiv.innerHTML = ''; // Clear previous content (like the 'Ready' message)
         const canvas = document.createElement('canvas');
-        QRCode.toCanvas(canvas, qr, { width: 256 }, (err) => {
+
+        // --- CHANGE THE WIDTH HERE from 256 to 200 ---
+        QRCode.toCanvas(canvas, qr, { width: 200 }, (err) => { // This should match the CSS width for #qrcode
             if (err) {
                 console.error('QR Code Error:', err);
                 displayStatus('Error generating QR code.', 'error');
@@ -120,6 +125,47 @@ window.addEventListener('DOMContentLoaded', () => {
     socket.on('log_updated', () => {
         console.log('Log update received from server, refreshing log list.');
         fetchAndRenderLogs();
+    });
+
+     socket.on('upload_progress', (data) => {
+        if (!progressState.startTime) {
+            progressState.startTime = Date.now();
+            progressState.total = data.total;
+        }
+
+        const percentage = Math.round((data.current / data.total) * 100);
+        
+        // Update pie chart
+        const $ppc = document.querySelector('.progress-pie-chart');
+        const $span = document.getElementById('progress-percentage');
+        $ppc.dataset.percent = percentage;
+        $span.textContent = `${percentage}%`;
+
+        const deg = (360 * percentage) / 100;
+        if (percentage > 50) {
+            $ppc.classList.add('gt-50');
+        }
+        document.querySelector('.ppc-progress-fill').style.transform = `rotate(${deg}deg)`;
+
+        // Calculate and display time remaining
+        const elapsedMs = Date.now() - progressState.startTime;
+        const avgTimePerGroup = elapsedMs / data.current;
+        const remainingGroups = data.total - data.current;
+        const remainingMs = Math.round(remainingGroups * avgTimePerGroup);
+        const remainingMinutes = Math.floor(remainingMs / 60000);
+        const remainingSeconds = Math.round((remainingMs % 60000) / 1000);
+        const timeString = remainingMinutes > 0 ? `~${remainingMinutes}m ${remainingSeconds}s` : `~${remainingSeconds}s`;
+
+        uploadStatusText.innerHTML = `Processing group ${data.current} of ${data.total}: <b>${data.currentGroup}</b><br>Time remaining: ${timeString}`;
+    });
+
+    socket.on('upload_complete', (data) => {
+        uploadStatusText.innerHTML = `✅<br><b>Processing complete!</b><br>${data.successCount} groups processed.`;
+        progressState = {}; // Reset state
+        // Hide the progress section after a few seconds
+        setTimeout(() => {
+            uploadStatusSection.classList.add('hidden');
+        }, 5000);
     });
 
     // --- Form Event Listeners ---
@@ -179,6 +225,17 @@ window.addEventListener('DOMContentLoaded', () => {
         const submitButton = groupForm.querySelector('button[type="submit"]');
         submitButton.disabled = true;
         submitButton.textContent = 'Processing...';
+
+        if (mode === 'csv') {
+            uploadStatusSection.classList.remove('hidden');
+            uploadStatusText.textContent = 'Starting processing...';
+            // Reset pie chart visuals
+            const $ppc = document.querySelector('.progress-pie-chart');
+            $ppc.classList.remove('gt-50');
+            $ppc.dataset.percent = '0';
+            document.querySelector('.ppc-progress-fill').style.transform = 'rotate(0deg)';
+            document.getElementById('progress-percentage').textContent = '0%';
+        }
 
         // --- Add this line to disable the whole form ---
         groupForm.querySelectorAll('input, textarea').forEach(el => el.disabled = true);

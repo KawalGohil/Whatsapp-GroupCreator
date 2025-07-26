@@ -59,7 +59,16 @@
                     <button type="submit">Create Group</button>
                 </form>
                 <div id="upload-status-section" class="hidden">
-                    <progress id="upload-progress-bar" value="0" max="100"></progress>
+                    <div class="progress-pie-chart" data-percent="0">
+                        <div class="ppc-progress">
+                            <div class="ppc-progress-fill"></div>
+                        </div>
+                        <div class="ppc-percents">
+                            <div class="pcc-percents-wrapper">
+                                <span id="progress-percentage">0%</span>
+                            </div>
+                        </div>
+                    </div>
                     <div id="upload-status-text"></div>
                 </div>
             </div>
