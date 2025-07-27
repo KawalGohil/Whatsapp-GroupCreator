@@ -47,18 +47,17 @@ async function createGroupWithBaileys(sock, username, groupName, participants, a
         return;
     }
 
+     const numbersToValidate = participants.map(p => p.split('@')[0]);
+    const onWhatsApp = await sock.onWhatsApp(...numbersToValidate);
+
     const confirmedParticipants = [];
-    // **FIX**: This loop now correctly checks each number individually.
-    for (const p of participants) {
-        if (!p) continue;
-        // We check the number without the @s.whatsapp.net suffix
-        const [result] = await sock.onWhatsApp(p.split('@')[0]);
-        if (result?.exists) {
-            confirmedParticipants.push(result.jid); // Use the JID from the result
+    onWhatsApp.forEach(result => {
+        if (result.exists) {
+            confirmedParticipants.push(result.jid);
         } else {
-            logger.warn(`Number ${p} is not on WhatsApp. Skipping.`);
+            logger.warn(`Number ${result.jid} is not on WhatsApp. Skipping.`);
         }
-    }
+    });
 
     if (confirmedParticipants.length === 0) throw new Error('No valid WhatsApp users found.');
 
@@ -73,10 +72,10 @@ async function createGroupWithBaileys(sock, username, groupName, participants, a
             try {
                 await sock.groupParticipantsUpdate(group.id, [adminJid], "promote");
                 logger.info(`Successfully promoted ${adminJid} to admin in group "${groupName}".`);
-                // Consider adding a success note to the log here if needed
             } catch (e) {
                 logger.error(`Failed to promote admin ${adminJid}: ${e.message}`);
-                // Write a distinct log entry about the promotion failure
+                // --- ADD THIS LINE ---
+                // This logs the failure so the user is aware.
                 writeInviteLog(username, groupName, inviteLink, 'Success (Admin Promotion Failed)', e.message);
             }
         } else {
@@ -88,7 +87,7 @@ async function createGroupWithBaileys(sock, username, groupName, participants, a
     const inviteCode = await sock.groupInviteCode(group.id);
     const inviteLink = `https://chat.whatsapp.com/${inviteCode}`;
     
-    writeInviteLog(username, groupName, inviteLink, 'Success (Baileys)');
+    writeInviteLog(username, groupName, inviteLink, 'Success');
     emitLogUpdated(username); // Notifies frontend to refresh logs
     
     state.createdGroups[groupName] = group.id;

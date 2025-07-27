@@ -159,38 +159,45 @@ window.addEventListener('DOMContentLoaded', () => {
         uploadStatusText.innerHTML = `Processing group ${data.current} of ${data.total}: <b>${data.currentGroup}</b><br>Time remaining: ${timeString}`;
     });
 
-    socket.on('upload_complete', (data) => {
-        uploadStatusText.innerHTML = `✅<br><b>Processing complete!</b><br>${data.successCount} groups processed.`;
-        progressState = {}; // Reset state
-        // Hide the progress section after a few seconds
-        setTimeout(() => {
-            uploadStatusSection.classList.add('hidden');
-        }, 5000);
-    });
+   socket.on('upload_complete', (data) => {
+    let message = `✅<br><b>Processing complete!</b><br>${data.successCount} of ${data.total} groups processed successfully.`;
+    if (data.failedCount > 0) {
+        message += `<br><span style="color: var(--error-color);">${data.failedCount} groups failed.</span>`;
+    }
+    uploadStatusText.innerHTML = message;
+    progressState = {}; // Reset state
+    setTimeout(() => {
+        uploadStatusSection.classList.add('hidden');
+    }, 8000); // Increased timeout to allow reading the message
+});
 
     // --- Form Event Listeners ---
     loginForm.addEventListener('submit', async (e) => {
-        e.preventDefault();
-        showLogin(); 
-        const username = loginForm.querySelector('#login-username').value;
-        const password = loginForm.querySelector('#login-password').value;
-        try {
-            const response = await fetch('/api/auth/login', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ username, password }),
-            });
-            const data = await response.json();
-            if (response.ok) {
-                showApp(username);
-                showToast('Login successful!', 'success');
-            } else {
-                loginStatus.textContent = data.message || 'Login failed.';
-            }
-        } catch (error) {
-            loginStatus.textContent = 'Error connecting to server.';
+    e.preventDefault();
+
+    // --- FIX: Read values BEFORE resetting the form ---
+    const username = loginForm.querySelector('#login-username').value;
+    const password = loginForm.querySelector('#login-password').value;
+
+    showLogin(); // Now it's safe to reset the UI for the new login attempt
+
+    try {
+        const response = await fetch('/api/auth/login', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ username, password }),
+        });
+        const data = await response.json();
+        if (response.ok) {
+            showApp(username);
+            showToast('Login successful!', 'success');
+        } else {
+            loginStatus.textContent = data.message || 'Login failed.';
         }
-    });
+    } catch (error) {
+        loginStatus.textContent = 'Error connecting to server.';
+    }
+});
 
     registerForm.addEventListener('submit', async (e) => {
         e.preventDefault();

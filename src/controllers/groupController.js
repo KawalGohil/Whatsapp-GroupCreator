@@ -67,6 +67,9 @@ async function processCsvFile(filePath, sock, username) {
             fs.unlinkSync(filePath);
             logger.info(`Processing ${rows.length} groups from CSV for user ${username}.`);
 
+            let successCount = 0;
+            let failedCount = 0;
+
             for (const [index, row] of rows.entries()) {
                 let groupName;
                 try {
@@ -93,13 +96,15 @@ async function processCsvFile(filePath, sock, username) {
                     if (uniqueParticipants.length === 0) throw new Error('No valid participants found.');
                     
                     await createGroup(sock, username, groupName, uniqueParticipants, adminJid);
+                    successCount++; // Increment success counter
                     
                     global.io.to(global.userSockets[username]).emit('upload_progress', { current: index + 1, total: rows.length, currentGroup: groupName });
                 } catch (error) {
+                    failedCount++; // Increment failure counter
                     logger.error(`Failed to process row ${index + 1} (${groupName || 'Unknown'}): ${error.message}`);
                 }
             }
-            global.io.to(global.userSockets[username]).emit('upload_complete', { successCount: rows.length, failedCount: 0 });
+            global.io.to(global.userSockets[username]).emit('upload_complete', { successCount, failedCount, total: rows.length });
         });
 }
 
