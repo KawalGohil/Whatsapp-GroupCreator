@@ -142,9 +142,17 @@ window.addEventListener('DOMContentLoaded', () => {
         $span.textContent = `${percentage}%`;
 
         const deg = (360 * percentage) / 100;
+        if (percentage <= 50) {
+        $ppc.classList.remove('gt-50');
+        }
+
         if (percentage > 50) {
             $ppc.classList.add('gt-50');
         }
+
+        const progressFill = $ppc.querySelector('.ppc-progress-fill');
+        progressFill.style.transform = `rotate(${deg}deg)`;
+
         document.querySelector('.ppc-progress-fill').style.transform = `rotate(${deg}deg)`;
 
         // Calculate and display time remaining
