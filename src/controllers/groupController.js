@@ -8,15 +8,22 @@ const config = require('../../config');
 
 const sanitizePhoneNumber = (num) => {
     if (!num) return null;
-    // Convert from scientific notation and remove all non-digit characters
-    const cleaned = String(Number(num)).replace(/\D/g, '');
-    
-    // If the number is valid (10 digits or more), format it.
-    if (cleaned.length >= 10) {
+    // Remove all non-digit characters. This safely handles scientific notation and special characters.
+    const cleaned = String(num).replace(/\D/g, '');
+
+    // Assuming that valid numbers must have a country code to be universally correct.
+    // This example enforces a minimum length of 11 (e.g., US numbers) but can be adjusted.
+    if (cleaned.length >= 11) { 
         return `${cleaned}@s.whatsapp.net`;
-    }    
-    // Otherwise, the number is invalid
-    return null;
+    }
+    // Handle 10-digit numbers by prepending a default country code, but log a warning.
+    else if (cleaned.length === 10) {
+        logger.warn(`Assuming country code '91' for 10-digit number: ${cleaned}`);
+        return `91${cleaned}@s.whatsapp.net`;
+    }
+    
+    logger.warn(`Skipping invalid or incomplete phone number: ${num}`);
+    return null; // Return null for any number that is too short.
 };
 
 

@@ -69,12 +69,15 @@ async function createGroupWithBaileys(sock, username, groupName, participants, a
     if (adminJid) {
         if (confirmedParticipants.includes(adminJid)) {
             logger.info(`Attempting to promote ${adminJid} to admin...`);
-            await delay(3000); // Wait for group to settle
+            await delay(3000);
             try {
                 await sock.groupParticipantsUpdate(group.id, [adminJid], "promote");
                 logger.info(`Successfully promoted ${adminJid} to admin in group "${groupName}".`);
+                // Consider adding a success note to the log here if needed
             } catch (e) {
                 logger.error(`Failed to promote admin ${adminJid}: ${e.message}`);
+                // Write a distinct log entry about the promotion failure
+                writeInviteLog(username, groupName, inviteLink, 'Success (Admin Promotion Failed)', e.message);
             }
         } else {
             logger.warn(`Admin JID ${adminJid} was not in the final list of confirmed participants. Cannot promote.`);

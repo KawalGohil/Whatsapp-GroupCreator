@@ -35,14 +35,29 @@ exports.login = (req, res) => {
     const { username, password } = req.body;
 
     userModel.findUserByUsername(username, (err, user) => {
-        if (err || !user) {
+        // Handle potential database errors first
+        if (err) {
+            logger.error(`Database error during login for user ${username}:`, err);
+            return res.status(500).json({ message: 'An internal server error occurred.' });
+        }
+
+        // Handle case where user is not found
+        if (!user) {
             return res.status(401).json({ message: 'Invalid username or password.' });
         }
 
-        userModel.verifyPassword(password, user.password, (err, isMatch) => {
-            if (err || !isMatch) {
+        // If user is found, proceed to verify the password
+        userModel.verifyPassword(password, user.password, (bcryptErr, isMatch) => {
+            if (bcryptErr) {
+                logger.error(`Bcrypt error during login for user ${username}:`, bcryptErr);
+                return res.status(500).json({ message: 'An internal server error occurred.' });
+            }
+
+            if (!isMatch) {
                 return res.status(401).json({ message: 'Invalid username or password.' });
             }
+
+            // --- Success ---
             req.session.user = { id: user.id, username: user.username };
             logger.info(`User ${username} logged in.`);
             if (!getClient(username)) {
