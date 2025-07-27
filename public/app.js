@@ -67,6 +67,8 @@ window.addEventListener('DOMContentLoaded', () => {
         qrcodeDiv.innerHTML = '';
         statusDiv.classList.remove('hidden');
         displayStatus('Connecting to WhatsApp...', 'info');
+
+        document.getElementById('log-file-select').innerHTML = '<option value="" disabled selected>Select a log file</option>';
     }
 
     function displayStatus(message, type = 'info') {

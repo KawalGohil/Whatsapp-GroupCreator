@@ -25,9 +25,22 @@ async function startBaileysClient(clientId) {
 
     clients[clientId] = sock;
 
+     let connectionTimeout = setTimeout(() => {
+        const socketId = global.userSockets?.[clientId];
+        if (sock.ws.readyState !== sock.ws.OPEN && socketId) {
+            logger.error(`Connection timed out for ${clientId}.`);
+            global.io.to(socketId).emit('status', 'Connection timed out. Please refresh.');
+            sock.ws.close(); // Close the WebSocket connection attempt
+        }
+    }, 45000); // 45-second timeout
+
     sock.ev.on('connection.update', (update) => {
         const { connection, lastDisconnect, qr } = update;
         const socketId = global.userSockets?.[clientId];
+
+        if (connection === 'open' || connection === 'close' || qr) {
+            clearTimeout(connectionTimeout);
+        }
 
         if (qr && socketId) {
             logger.info(`QR code available for ${clientId}, sending to frontend.`);
