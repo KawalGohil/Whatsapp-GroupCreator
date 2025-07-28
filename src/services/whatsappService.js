@@ -77,8 +77,20 @@ function closeBaileysClient(clientId) {
     const sock = clients[clientId];
     if (sock) {
         logger.info(`Closing Baileys client for ${clientId}.`);
-        sock.logout(); // This gracefully closes the connection
+        // This gracefully disconnects the socket but leaves auth files intact.
+        sock.ev.removeAllListeners('connection.update');
+        sock.end(undefined);
         delete clients[clientId];
+
+        // --- THIS BLOCK SHOULD BE REMOVED ---
+        // Do NOT delete the session directory on logout.
+        /*
+        const sessionDir = path.join(config.paths.session, clientId);
+        if (fs.existsSync(sessionDir)) {
+            fs.rmSync(sessionDir, { recursive: true, force: true });
+            logger.info(`Removed session directory for ${clientId}.`);
+        }
+        */
     }
 }
 
