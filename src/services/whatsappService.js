@@ -1,87 +1,122 @@
 // src/services/whatsappService.js
 const { default: makeWASocket, useMultiFileAuthState, DisconnectReason, Browsers } = require('@whiskeysockets/baileys');
 const { Boom } = require('@hapi/boom');
-const path = require('path');
+const path =require('path');
 const config = require('../../config');
 const logger = require('../utils/logger');
 const taskQueue = require('./taskQueue');
 const { createGroup } = require('./groupCreationService');
-const fs = require('fs');
 
-let sock = null;
-const SESSION_FILE_PATH = path.join(config.paths.session, 'main-session');
+const activeClients = {};
 
-async function startMainClient() {
-    logger.info('Initializing main WhatsApp client...');
-    const { state, saveCreds } = await useMultiFileAuthState(SESSION_FILE_PATH);
+async function startBaileysClient(username) {
+    if (activeClients[username]) {
+        logger.info(`Client for ${username} already exists.`);
+        return;
+    }
+
+    logger.info(`Initializing Baileys client for user: ${username}`);
+    const sessionPath = path.join(config.paths.session, username);
+    const { state, saveCreds } = await useMultiFileAuthState(sessionPath);
     
-    sock = makeWASocket({
+    const sock = makeWASocket({
         auth: state,
         printQRInTerminal: true,
         browser: Browsers.macOS('Desktop'),
-        logger: require('pino')({ level: 'silent' })
+        logger: pino({ level: 'silent' })
     });
+
+    activeClients[username] = sock;
 
     sock.ev.on('connection.update', (update) => {
         const { connection, lastDisconnect, qr } = update;
-        if (qr) {
-            logger.info('QR code generated for main client. Scan with WhatsApp!');
-        }
+        const userSocketId = global.userSockets?.[username];
 
+        if (qr && userSocketId) {
+            logger.info(`Sending QR code to user ${username}`);
+            global.io.to(userSocketId).emit('qr', qr);
+        }
+        
         if (connection === 'close') {
             const shouldReconnect = new Boom(lastDisconnect?.error)?.output?.statusCode !== DisconnectReason.loggedOut;
-            logger.error('Main client connection closed. Reconnecting:', shouldReconnect);
+            logger.error(`Connection for ${username} closed. Reason: ${lastDisconnect?.error?.message}. Reconnecting: ${shouldReconnect}`);
+            
+            delete activeClients[username];
             if (shouldReconnect) {
-                startMainClient();
+                setTimeout(() => startBaileysClient(username), 5000);
             } else {
-                logger.error('Main client logged out. Delete the "main-session" folder to generate a new QR code.');
+                logger.error(`${username} logged out of WhatsApp. Session data will be cleared.`);
+                // Clean up the session directory if logged out
+                // fs.rmdirSync(sessionPath, { recursive: true });
             }
         } else if (connection === 'open') {
-            logger.info('Main WhatsApp client connected successfully.');
-            taskQueue.emit('client_ready');
+            logger.info(`Client for ${username} connected successfully.`);
+            if (userSocketId) {
+                global.io.to(userSocketId).emit('status', 'Client is ready!');
+            }
+            // Trigger queue processing for this user
+            processQueue();
         }
     });
 
     sock.ev.on('creds.update', saveCreds);
 }
 
-function getMainClient() {
-    return sock;
+function getClient(username) {
+    return activeClients[username];
+}
+
+async function closeBaileysClient(username) {
+    const sock = activeClients[username];
+    if (sock) {
+        logger.info(`Closing Baileys client for ${username}.`);
+        await sock.logout();
+        delete activeClients[username];
+    }
 }
 
 async function processQueue() {
-    if (taskQueue.isProcessing || taskQueue.queue.length === 0) return;
+    if (taskQueue.isProcessing || taskQueue.queue.length === 0) {
+        return;
+    }
     
-    const client = getMainClient();
-    if (!client || client.ws.readyState !== 1) { // 1 means WebSocket is OPEN
-        logger.warn('Client not ready, waiting to process queue.');
+    const task = taskQueue.queue[0]; // Peek at the task without removing it
+    const client = getClient(task.username);
+
+    // Only process if the user's client is connected and ready
+    if (!client || client.ws.readyState !== 1) {
+        logger.warn(`Client for ${task.username} not ready. Queue processing paused for this user.`);
         return;
     }
 
     taskQueue.isProcessing = true;
-    const task = taskQueue.getNextTask();
-    
+    taskQueue.getNextTask(); // Now remove the task
+
+    logger.info(`Processing task for group "${task.groupName}" for user "${task.username}"`);
+
     try {
         await createGroup(client, task.username, task.groupName, task.participants, task.adminJid);
-        if (global.io && global.userSockets[task.username]) {
-            global.io.to(global.userSockets[task.username]).emit('upload_progress', { current: task.index, total: task.total, currentGroup: task.groupName });
+        
+        const userSocketId = global.userSockets?.[task.username];
+        if (userSocketId) {
+            global.io.to(userSocketId).emit('upload_progress', {
+                current: task.index,
+                total: task.total,
+                currentGroup: task.groupName
+            });
         }
     } catch (error) {
         logger.error(`Failed to process task for group "${task.groupName}": ${error.message}`);
     } finally {
         taskQueue.isProcessing = false;
-        // Immediately try to process the next item in the queue
         process.nextTick(processQueue);
     }
 }
 
-// Listen for events to start processing the queue
 taskQueue.on('new_task', processQueue);
-taskQueue.on('client_ready', processQueue);
 
-// This function is no longer needed but we keep it to avoid breaking other files temporarily.
-function closeBaileysClient(clientId) {
-    logger.info(`User ${clientId} logged out. The main client remains active.`);
-}
-
-module.exports = { startMainClient, getMainClient, closeBaileysClient };
+module.exports = { 
+    startBaileysClient,
+    getClient,
+    closeBaileysClient
+};
