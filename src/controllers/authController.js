@@ -1,5 +1,6 @@
 const userModel = require('../models/userModel');
-const { startBaileysClient, getClient, closeBaileysClient } = require('../services/whatsappService');
+// --- FIX: Remove getClient and startBaileysClient from the import ---
+const { closeBaileysClient } = require('../services/whatsappService');
 const logger = require('../utils/logger');
 
 // User Registration
@@ -11,7 +12,6 @@ exports.register = (req, res) => {
 
     userModel.createUser(username, password, (err, user) => {
         if (err) {
-            // This is the key fix: Send a specific error message for duplicate usernames
             if (err.message.includes('Username already exists')) {
                 return res.status(409).json({ message: 'Username is already taken. Please choose another.' });
             }
@@ -22,7 +22,8 @@ exports.register = (req, res) => {
         req.session.user = { id: user.id, username: user.username };
         logger.info(`User ${username} registered and logged in.`);
         
-        startBaileysClient(username);
+        // --- REMOVE THIS LINE ---
+        // startBaileysClient(username);
         
         res.status(201).json({ message: 'Registration successful.' });
     });
@@ -35,18 +36,15 @@ exports.login = (req, res) => {
     const { username, password } = req.body;
 
     userModel.findUserByUsername(username, (err, user) => {
-        // Handle potential database errors first
         if (err) {
             logger.error(`Database error during login for user ${username}:`, err);
             return res.status(500).json({ message: 'An internal server error occurred.' });
         }
 
-        // Handle case where user is not found
         if (!user) {
             return res.status(401).json({ message: 'Invalid username or password.' });
         }
 
-        // If user is found, proceed to verify the password
         userModel.verifyPassword(password, user.password, (bcryptErr, isMatch) => {
             if (bcryptErr) {
                 logger.error(`Bcrypt error during login for user ${username}:`, bcryptErr);
@@ -57,12 +55,16 @@ exports.login = (req, res) => {
                 return res.status(401).json({ message: 'Invalid username or password.' });
             }
 
-            // --- Success ---
             req.session.user = { id: user.id, username: user.username };
             logger.info(`User ${username} logged in.`);
+
+            // --- REMOVE THIS BLOCK ---
+            /*
             if (!getClient(username)) {
                 startBaileysClient(username);
             }
+            */
+           
             res.status(200).json({ message: 'Login successful.' });
         });
     });

@@ -6,8 +6,7 @@ const SQLiteStore = require('connect-sqlite3')(session);
 const config = require('./config');
 const logger = require('./src/utils/logger');
 const { initializeSocket } = require('./src/services/socketService');
-const { startMainClient } = require('./src/services/mainWhatsappClient');
-
+const { startMainClient } = require('./src/services/whatsappService');
 const authRoutes = require('./src/routes/authRoutes');
 const groupRoutes = require('./src/routes/groupRoutes');
 

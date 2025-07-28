@@ -1,10 +1,10 @@
 const { Server } = require('socket.io');
 const logger = require('../utils/logger');
-const { startBaileysClient, getClient } = require('./whatsappService');
-const path = require('path');
-const config = require('../../config'); 
-const fs = require('fs');
+// --- FIX: Import the new main client service ---
 const { getMainClient } = require('./whatsappService');
+const fs = require('fs');
+const path = require('path');
+const config = require('../../config');
 
 // This object will map a username to their active socket ID
 global.userSockets = {};
@@ -42,30 +42,20 @@ function initializeSocket(server, sessionMiddleware) {
         global.userSockets[username] = socket.id;
         logger.info(`User '${username}' connected with socket ID: ${socket.id}`);
 
-        // Initialize a Baileys client if one isn't already running for this user
-        const sessionDir = path.join(config.paths.session, username);
-        if (getClient(username)) {
-            // If the client is already running in memory, it's ready.
-            logger.info(`Client for ${username} is already running in memory.`);
-            socket.emit('status', 'Client is ready!');
-        } else if (fs.existsSync(sessionDir)) {
-            // If the session files exist on disk, a connection is likely possible without a QR code.
-            logger.info(`Session files found for ${username}. Attempting to reconnect...`);
-            socket.emit('status', 'Reconnecting to WhatsApp...'); // Give immediate feedback
-            startBaileysClient(username);
-        } else {
-            // No client and no session files means we need a new QR scan.
-            logger.info(`No active client or session for ${username}. Starting new Baileys session.`);
-            startBaileysClient(username);
-        }
 
-        const mainClient = getMainClient();
-        if (mainClient && mainClient.ws.readyState === 1) { // 1 means OPEN
+          const mainClient = getMainClient();
+        if (mainClient && mainClient.ws.readyState === 1) { // 1 means WebSocket is OPEN
             logger.info('Main client is ready, notifying user.');
             socket.emit('status', 'Client is ready!');
         } else {
             logger.warn('Main client not connected. User may need to scan QR from server console.');
-            socket.emit('status', 'Server client is not connected. Please contact admin.');
+            // We can attempt to send a QR if one becomes available
+            const sessionDir = path.join(config.paths.session, 'main-session');
+            if (!fs.existsSync(sessionDir)) {
+                 socket.emit('status', 'Please scan the QR code from the server console.');
+            } else {
+                 socket.emit('status', 'Server client is reconnecting...');
+            }
         }
 
         socket.on('disconnect', (reason) => {
