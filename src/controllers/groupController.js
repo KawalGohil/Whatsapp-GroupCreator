@@ -20,7 +20,7 @@ const sanitizePhoneNumber = (num) => {
     return null;
 };
 
-// Manual Group Creation (No changes needed here)
+// Manual Group Creation (No changes needed)
 exports.createManualGroup = async (req, res) => {
     const { groupName, numbers, desiredAdminNumber } = req.body;
     const username = req.session.user.username;
@@ -42,11 +42,10 @@ exports.createManualGroup = async (req, res) => {
 };
 
 // --- THIS IS THE FIX ---
-// This function is updated to handle your specific CSV headers
 function processCsvFile(filePath, username) {
     const rows = [];
-    // Normalize headers to be lowercase and replace spaces with underscores
-    const mapHeaders = ({ header }) => header.toLowerCase().replace(/\s+/g, '_');
+    // Normalize headers: lowercase and replace spaces/hyphens with underscores
+    const mapHeaders = ({ header }) => header.toLowerCase().replace(/[\s-]+/g, '_');
 
     fs.createReadStream(filePath)
         .pipe(csv({ mapHeaders }))
@@ -60,15 +59,25 @@ function processCsvFile(filePath, username) {
 
             for (const [index, row] of rows.entries()) {
                 try {
-                    // Use 'property_name' or a fallback for the group name
-                    const groupName = row.property_name || row.group_name || `Group_${Date.now()}`;
+                    // --- CONSTRUCT GROUP NAME FROM SPECIFIC COLUMNS ---
+                    const bookingId = row.booking_id;
+                    const propertyName = row.property_name;
+                    const checkIn = row.check_in;
                     
-                    // Get numbers from all potential member columns
+                    let groupName;
+                    if (bookingId && propertyName && checkIn) {
+                        groupName = `${bookingId} - ${propertyName} - ${checkIn}`;
+                    } else {
+                        // Fallback name if any of the required columns are missing
+                        groupName = `Group_Row_${index + 1}_${Date.now()}`;
+                        logger.warn(`Row ${index + 1} is missing required columns for group name. Using fallback: ${groupName}`);
+                    }
+                    
                     const adminNumber = row.admin_number;
-                    const semNumber = row.sem_number;
-                    const contactNumber = row.contact;
-
-                    const allNumbers = [adminNumber, semNumber, contactNumber].filter(Boolean);
+                    const memberNumbers = (row.member_numbers || '').split(',').map(s => s.trim());
+                    const contactNumber = row.contact; // Adding 'contact' as a potential member column
+                    
+                    const allNumbers = [adminNumber, contactNumber, ...memberNumbers].filter(Boolean);
                     
                     if (allNumbers.length === 0) {
                         logger.warn(`Skipping row ${index + 1} for group "${groupName}" due to no valid numbers.`);

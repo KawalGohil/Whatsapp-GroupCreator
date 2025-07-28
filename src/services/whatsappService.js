@@ -2,9 +2,10 @@
 const { default: makeWASocket, useMultiFileAuthState, DisconnectReason, Browsers } = require('@whiskeysockets/baileys');
 const { Boom } = require('@hapi/boom');
 const path = require('path');
+const fs = require('fs'); // Import the file system module
 const config = require('../../config');
 const logger = require('../utils/logger');
-const taskQueue = require('../services/taskQueue');
+const taskQueue = require('./taskQueue');
 const { createGroup } = require('./groupCreationService');
 const pino = require('pino');
 
@@ -45,18 +46,33 @@ async function startBaileysClient(username) {
             delete activeClients[username];
             if (shouldReconnect) {
                 setTimeout(() => startBaileysClient(username), 5000);
+            } else {
+                // --- THIS IS THE FIX ---
+                // If the reason for closing is a logout, automatically delete the session folder.
+                logger.error(`${username} was logged out. Clearing session data to force a new QR scan on next login.`);
+                if (fs.existsSync(sessionPath)) {
+                    fs.rm(sessionPath, { recursive: true, force: true }, (err) => {
+                        if (err) {
+                            logger.error(`Failed to delete session folder for ${username}:`, err);
+                        } else {
+                            logger.info(`Successfully deleted session folder for ${username}.`);
+                        }
+                    });
+                }
             }
         } else if (connection === 'open') {
             logger.info(`Client for ${username} connected successfully.`);
             if (userSocketId) {
                 global.io.to(userSocketId).emit('status', 'Client is ready!');
             }
-            processQueueForUser(username);
+            setTimeout(() => processQueueForUser(username), 500);
         }
     });
 
     sock.ev.on('creds.update', saveCreds);
 }
+
+// ... (The rest of the file remains unchanged)
 
 function getClient(username) {
     return activeClients[username];
@@ -71,7 +87,6 @@ async function closeBaileysClient(username) {
     }
 }
 
-// --- THIS IS THE ROBUSTNESS FIX ---
 async function processQueueForUser(username) {
     if (processingUsers.has(username)) {
         logger.info(`Queue processing is already active for user: ${username}`);
@@ -80,8 +95,6 @@ async function processQueueForUser(username) {
 
     const client = getClient(username);
     
-    // A more reliable check: The 'user' property is only set after a successful
-    // login and connection. This avoids the race condition with ws.readyState.
     if (!client || !client.user) {
         logger.warn(`Queue check for ${username} triggered, but client is not fully authenticated yet.`);
         return;

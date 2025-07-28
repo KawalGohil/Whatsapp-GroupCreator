@@ -1,3 +1,4 @@
+require('dotenv').config(); // Load environment variables
 const express = require('express');
 const http = require('http');
 const path = require('path');
@@ -6,7 +7,6 @@ const SQLiteStore = require('connect-sqlite3')(session);
 const config = require('./config');
 const logger = require('./src/utils/logger');
 const { initializeSocket } = require('./src/services/socketService');
-// No longer importing startMainClient
 const authRoutes = require('./src/routes/authRoutes');
 const groupRoutes = require('./src/routes/groupRoutes');
 
@@ -24,7 +24,7 @@ const sessionMiddleware = session({
         db: path.basename(config.paths.sessionStore),
         dir: path.dirname(config.paths.sessionStore),
     }),
-    secret: process.env.SESSION_SECRET || 'a-super-secret-key',
+    secret: process.env.SESSION_SECRET, // Use environment variable
     resave: false,
     saveUninitialized: false,
     cookie: { maxAge: 7 * 24 * 60 * 60 * 1000 }, // 1 week
@@ -33,7 +33,7 @@ app.use(sessionMiddleware);
 
 // --- Initialize Services ---
 const io = initializeSocket(server, sessionMiddleware);
-global.io = io; // Make io accessible globally
+global.io = io;
 
 // --- API Routes ---
 app.use('/api/auth', authRoutes);
