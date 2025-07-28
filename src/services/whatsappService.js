@@ -1,17 +1,19 @@
+// src/services/whatsappService.js
 const { default: makeWASocket, useMultiFileAuthState, DisconnectReason, Browsers } = require('@whiskeysockets/baileys');
 const { Boom } = require('@hapi/boom');
 const path = require('path');
 const config = require('../../config');
 const logger = require('../utils/logger');
-const taskQueue = require('../services/taskQueue');
+const taskQueue = require('./taskQueue');
 const { createGroup } = require('./groupCreationService');
 const pino = require('pino');
 
 const activeClients = {};
+const processingUsers = new Set(); // To prevent concurrent processing for the same user
 
 async function startBaileysClient(username) {
     if (activeClients[username]) {
-        logger.info(`Client for ${username} already exists and is likely connecting.`);
+        logger.info(`Client for ${username} is already initializing or connected.`);
         return;
     }
 
@@ -52,8 +54,7 @@ async function startBaileysClient(username) {
             if (userSocketId) {
                 global.io.to(userSocketId).emit('status', 'Client is ready!');
             }
-            // --- THIS IS THE KEY FIX ---
-            // Only start processing the queue once the client for that user is confirmed open.
+            // --- FIX: Trigger queue processing when the client is ready ---
             processQueueForUser(username);
         }
     });
@@ -74,9 +75,12 @@ async function closeBaileysClient(username) {
     }
 }
 
-// --- NEW FUNCTION TO PROCESS TASKS FOR A SPECIFIC USER ---
+// --- REVISED AND ROBUST QUEUE PROCESSING LOGIC ---
 async function processQueueForUser(username) {
-    if (taskQueue.isProcessing) return; // A global lock to prevent multiple concurrent processing loops
+    if (processingUsers.has(username)) {
+        logger.info(`Queue processing is already running for user: ${username}`);
+        return;
+    }
 
     const client = getClient(username);
     if (!client || client.ws.readyState !== 1) {
@@ -84,22 +88,16 @@ async function processQueueForUser(username) {
         return;
     }
 
-    taskQueue.isProcessing = true;
+    processingUsers.add(username);
     logger.info(`Starting queue processing for user: ${username}`);
 
     try {
-        while (taskQueue.queue.length > 0) {
-            const taskIndex = taskQueue.queue.findIndex(t => t.username === username);
-            
-            if (taskIndex === -1) {
-                // No more tasks for this user, break the loop
-                break;
-            }
-            
-            // Extract the task using splice
+        let taskIndex;
+        // Keep processing as long as there are tasks for this user
+        while ((taskIndex = taskQueue.queue.findIndex(t => t.username === username)) !== -1) {
             const [task] = taskQueue.queue.splice(taskIndex, 1);
 
-            logger.info(`Processing task for group "${task.groupName}" for user "${task.username}"`);
+            logger.info(`Processing group "${task.groupName}" for user "${task.username}"`);
             
             try {
                 await createGroup(client, task.username, task.groupName, task.participants, task.adminJid);
@@ -113,21 +111,20 @@ async function processQueueForUser(username) {
                     });
                 }
             } catch (error) {
-                logger.error(`Failed to process task for group "${task.groupName}": ${error.message}`);
+                logger.error(`Task failed for group "${task.groupName}": ${error.message}`);
             }
         }
     } finally {
-        taskQueue.isProcessing = false;
+        processingUsers.delete(username);
         logger.info(`Finished queue processing for user: ${username}`);
     }
 }
 
-// When a new task is added, we don't process immediately.
-// We wait for the client to be ready.
-taskQueue.on('new_task', () => {
-    logger.info('New task added to the queue.');
+// --- FIX: This now triggers the queue for the specific user who added a task ---
+taskQueue.on('new_task', (username) => {
+    logger.info(`New task added for user: ${username}. Triggering queue check.`);
+    processQueueForUser(username);
 });
-
 
 module.exports = { 
     startBaileysClient,

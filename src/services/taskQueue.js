@@ -10,10 +10,9 @@ class TaskQueue extends EventEmitter {
 
     addTask(task) {
         this.queue.push(task);
-        // If we are not already processing, start the process.
-        if (!this.isProcessing) {
-            this.emit('new_task');
-        }
+        // --- THIS IS THE FIX ---
+        // Emit the username so the service knows which user's queue to check
+        this.emit('new_task', task.username);
     }
 
     getNextTask() {
