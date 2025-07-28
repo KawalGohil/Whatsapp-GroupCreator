@@ -9,7 +9,7 @@ const { createGroup } = require('./groupCreationService');
 const pino = require('pino');
 
 const activeClients = {};
-const processingUsers = new Set(); // To prevent concurrent processing for the same user
+const processingUsers = new Set(); // Tracks which user's queue is currently being processed
 
 async function startBaileysClient(username) {
     if (activeClients[username]) {
@@ -35,26 +35,21 @@ async function startBaileysClient(username) {
         const userSocketId = global.userSockets?.[username];
 
         if (qr && userSocketId) {
-            logger.info(`Sending QR code to user ${username}`);
             global.io.to(userSocketId).emit('qr', qr);
         }
         
         if (connection === 'close') {
             const shouldReconnect = new Boom(lastDisconnect?.error)?.output?.statusCode !== DisconnectReason.loggedOut;
-            logger.error(`Connection for ${username} closed. Reason: ${lastDisconnect?.error?.message}. Reconnecting: ${shouldReconnect}`);
-            
+            logger.error(`Connection for ${username} closed. Reconnecting: ${shouldReconnect}`);
             delete activeClients[username];
             if (shouldReconnect) {
                 setTimeout(() => startBaileysClient(username), 5000);
-            } else {
-                logger.error(`${username} logged out of WhatsApp. Session data needs to be cleared manually if re-login is needed.`);
             }
         } else if (connection === 'open') {
             logger.info(`Client for ${username} connected successfully.`);
             if (userSocketId) {
                 global.io.to(userSocketId).emit('status', 'Client is ready!');
             }
-            // --- FIX: Trigger queue processing when the client is ready ---
             processQueueForUser(username);
         }
     });
@@ -75,39 +70,37 @@ async function closeBaileysClient(username) {
     }
 }
 
-// --- REVISED AND ROBUST QUEUE PROCESSING LOGIC ---
+// --- THIS IS THE ROBUSTNESS FIX ---
 async function processQueueForUser(username) {
     if (processingUsers.has(username)) {
-        logger.info(`Queue processing is already running for user: ${username}`);
+        logger.info(`Queue processing is already active for user: ${username}`);
         return;
     }
 
     const client = getClient(username);
     if (!client || client.ws.readyState !== 1) {
-        logger.warn(`Attempted to process queue for ${username}, but client is not ready.`);
+        logger.warn(`Queue check for ${username} triggered, but client is not ready. Will try again upon connection.`);
         return;
     }
 
     processingUsers.add(username);
-    logger.info(`Starting queue processing for user: ${username}`);
+    logger.info(`Starting queue processing loop for user: ${username}`);
 
     try {
-        let taskIndex;
-        // Keep processing as long as there are tasks for this user
-        while ((taskIndex = taskQueue.queue.findIndex(t => t.username === username)) !== -1) {
-            const [task] = taskQueue.queue.splice(taskIndex, 1);
+        while (true) {
+            const taskIndex = taskQueue.queue.findIndex(t => t.username === username);
+            if (taskIndex === -1) {
+                break; // No more tasks for this user
+            }
 
-            logger.info(`Processing group "${task.groupName}" for user "${task.username}"`);
-            
+            const [task] = taskQueue.queue.splice(taskIndex, 1);
+            logger.info(`Processing task for group "${task.groupName}"`);
+
             try {
                 await createGroup(client, task.username, task.groupName, task.participants, task.adminJid);
-                
-                const userSocketId = global.userSockets?.[task.username];
-                if (userSocketId) {
-                    global.io.to(userSocketId).emit('upload_progress', {
-                        current: task.index,
-                        total: task.total,
-                        currentGroup: task.groupName
+                if (global.userSockets?.[task.username]) {
+                    global.io.to(global.userSockets[task.username]).emit('upload_progress', {
+                        current: task.index, total: task.total, currentGroup: task.groupName
                     });
                 }
             } catch (error) {
@@ -116,15 +109,18 @@ async function processQueueForUser(username) {
         }
     } finally {
         processingUsers.delete(username);
-        logger.info(`Finished queue processing for user: ${username}`);
+        logger.info(`Finished queue processing loop for user: ${username}`);
     }
 }
 
-// --- FIX: This now triggers the queue for the specific user who added a task ---
+// This event listener ensures that if a file is uploaded while the client is
+// already connected, the queue is processed immediately.
 taskQueue.on('new_task', (username) => {
     logger.info(`New task added for user: ${username}. Triggering queue check.`);
     processQueueForUser(username);
 });
+// --- END OF FIX ---
+
 
 module.exports = { 
     startBaileysClient,

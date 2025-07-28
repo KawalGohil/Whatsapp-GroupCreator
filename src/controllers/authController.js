@@ -61,14 +61,21 @@ exports.login = (req, res) => {
 exports.logout = (req, res) => {
     const username = req.session.user?.username;
 
-    req.session.destroy(async err => {
+    req.session.destroy(async (err) => { // Made the callback async
         if (err) {
             logger.error('Error destroying session:', err);
             return res.status(500).json({ message: 'Logout failed.' });
         }
         
         if (username) {
-            await closeBaileysClient(username); // Gracefully close the Baileys client
+            // Added 'await' to ensure we wait for the client to close
+            // and can catch any errors if it fails.
+            try {
+                await closeBaileysClient(username);
+            } catch (closeErr) {
+                logger.error(`Error closing Baileys client for ${username}:`, closeErr);
+            }
+            
             const socketId = global.userSockets?.[username];
             if (socketId && global.io) {
                 const socket = global.io.sockets.sockets.get(socketId);

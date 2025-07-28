@@ -9,12 +9,17 @@ function readState() {
     try {
         if (fs.existsSync(STATE_FILE)) {
             const rawState = fs.readFileSync(STATE_FILE, 'utf-8');
-            return JSON.parse(rawState);
+            const state = JSON.parse(rawState);
+            // Ensure the top-level createdGroups object exists
+            if (!state.createdGroups) {
+                state.createdGroups = {};
+            }
+            return state;
         }
     } catch (err) {
-        logger.error('Error reading state file:', err);
+        logger.error('Error reading state file, returning default state:', err);
     }
-    // Return a default state if file doesn't exist or is corrupt
+    // Return a default state that supports multiple users
     return { createdGroups: {} };
 }
 
