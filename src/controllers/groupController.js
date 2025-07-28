@@ -6,7 +6,10 @@ const { getClient } = require('../services/whatsappService');
 const taskQueue = require('../services/taskQueue');
 const logger = require('../utils/logger');
 const { createGroup } = require('../services/groupCreationService');
-const { writeInviteLog } = require('../utils/inviteLogger'); // Import the log writer
+const { writeInviteLog } = require('../utils/inviteLogger');
+// --- THIS IS THE FIX ---
+// Added the missing import for the config file
+const config = require('../../config');
 
 const sanitizePhoneNumber = (num) => {
     if (!num) return null;
@@ -61,11 +64,10 @@ exports.uploadContacts = async (req, res) => {
             const allNumbers = [row.admin_number, row.sem_number, row.contact].filter(Boolean);
             const participants = [...new Set(allNumbers.map(sanitizePhoneNumber).filter(Boolean))];
             
-            // --- FIX #1 & #3: Enforce minimum members and log failures ---
             if (participants.length < 2) {
                 logger.warn(`Skipping group "${groupName}": requires at least 2 valid members, but found ${participants.length}.`);
                 writeInviteLog(username, groupName, '', 'Failed', `Skipped: Not enough valid members found (${participants.length}).`);
-                continue; // Skip to the next row
+                continue;
             }
             
             queuedCount++;
@@ -77,7 +79,6 @@ exports.uploadContacts = async (req, res) => {
             });
         }
         
-        // --- FIX #2: Handle UI for batches with no valid tasks ---
         if (rows.length > 0 && queuedCount === 0) {
             logger.info(`Batch ${batchId} for user ${username} had no valid rows to queue.`);
             const userSocketId = global.userSockets?.[username];
