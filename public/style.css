@@ -239,58 +239,25 @@ button:hover {
     width: 150px;
     height: 150px;
     border-radius: 50%;
-    background-color: #e5e5e5;
     position: relative;
-    transition: background-color 0.2s; /* Smooth color change */
+    display: grid;
+    place-items: center;
+    /* This creates the pie chart effect */
+    background: conic-gradient(var(--primary-color) 0deg, #e5e5e5 0deg);
+    transition: background 0.2s;
 }
 
-/* When over 50%, the background of the main circle turns blue */
-.progress-pie-chart.gt-50 {
-    background-color: var(--primary-color);
-}
-
-.ppc-progress {
+.progress-pie-chart::before {
+    content: "";
     position: absolute;
-    width: 100%;
-    height: 100%;
-    clip: rect(0, 75px, 150px, 0); /* Clip the right half */
-}
-
-.ppc-progress .ppc-progress-fill {
-    position: absolute;
-    width: 100%;
-    height: 100%;
-    background: var(--primary-color);
-    border-radius: 50%;
-    clip: rect(0, 150px, 150px, 75px); /* Clip the left half of this rotating element */
-    transform: rotate(0deg);
-    transition: transform 0.2s linear; /* Smooth rotation */
-}
-
-/* When over 50%, we change the fill's color and clipping to reveal the parent's blue background */
-.gt-50 .ppc-progress {
-    clip: rect(auto, auto, auto, auto); /* Unclip the container */
-}
-
-.gt-50 .ppc-progress .ppc-progress-fill {
-    clip: rect(0, 75px, 150px, 0); /* Clip the right half of the rotating element */
-    background: #e5e5e5; /* The fill now becomes gray */
-}
-
-.ppc-percents {
-    position: absolute;
-    border-radius: 50%;
-    left: 10px;
-    top: 10px;
-    width: 130px;
     height: 130px;
+    width: 130px;
     background: #fff;
-    display: flex;
-    align-items: center;
-    justify-content: center;
+    border-radius: 50%;
 }
 
 #progress-percentage {
+    position: relative; /* Ensure text is on top */
     font-size: 24px;
     font-weight: bold;
     color: var(--primary-color);

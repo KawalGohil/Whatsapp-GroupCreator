@@ -79,13 +79,6 @@ function closeBaileysClient(clientId) {
         logger.info(`Closing Baileys client for ${clientId}.`);
         sock.logout(); // This gracefully closes the connection
         delete clients[clientId];
-
-        // Optional: Clean up session files on logout
-        const sessionDir = path.join(config.paths.session, clientId);
-        if (fs.existsSync(sessionDir)) {
-            fs.rmSync(sessionDir, { recursive: true, force: true });
-            logger.info(`Removed session directory for ${clientId}.`);
-        }
     }
 }
 

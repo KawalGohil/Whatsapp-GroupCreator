@@ -36,7 +36,7 @@ window.addEventListener('DOMContentLoaded', () => {
         if (!socket.connected) {
             socket.connect();
         }
-        // You can add logic here to fetch logs, etc.
+        fetchAndRenderLogs();
     }
 
     function showToast(message, type = 'success') {
@@ -139,23 +139,11 @@ window.addEventListener('DOMContentLoaded', () => {
         
         // Update pie chart
         const $ppc = document.querySelector('.progress-pie-chart');
-        const $span = document.getElementById('progress-percentage');
-        $ppc.dataset.percent = percentage;
-        $span.textContent = `${percentage}%`;
-
-        const deg = (360 * percentage) / 100;
-        if (percentage <= 50) {
-        $ppc.classList.remove('gt-50');
-        }
-
-        if (percentage > 50) {
-            $ppc.classList.add('gt-50');
-        }
-
-        const progressFill = $ppc.querySelector('.ppc-progress-fill');
-        progressFill.style.transform = `rotate(${deg}deg)`;
-
-        document.querySelector('.ppc-progress-fill').style.transform = `rotate(${deg}deg)`;
+    const $span = document.getElementById('progress-percentage');
+    
+    // Update the conic-gradient background for the pie chart
+    $ppc.style.background = `conic-gradient(var(--primary-color) ${percentage * 3.6}deg, #e5e5e5 0deg)`;
+    $span.textContent = `${percentage}%`;
 
         // Calculate and display time remaining
         const elapsedMs = Date.now() - progressState.startTime;
