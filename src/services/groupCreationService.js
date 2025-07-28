@@ -37,8 +37,8 @@ async function createGroupWithBaileys(sock, username, groupName, participants, a
 
     const confirmedParticipants = onWhatsApp.filter(result => result.exists).map(result => result.jid);
 
-    if (confirmedParticipants.length === 0) {
-        throw new Error('No valid WhatsApp users found.');
+    if (confirmedParticipants.length < 2) {
+        throw new Error(`Not enough valid WhatsApp users found to form a group (found ${confirmedParticipants.length}, need at least 2).`);
     }
 
     const group = await sock.groupCreate(groupName, confirmedParticipants);

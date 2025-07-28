@@ -1,81 +1,103 @@
 const fs = require('fs');
 const path = require('path');
 const csv = require('csv-parser');
-const { v4: uuidv4 } = require('uuid'); // Import UUID to create a unique ID for each batch
+const { v4: uuidv4 } = require('uuid');
 const { getClient } = require('../services/whatsappService');
 const taskQueue = require('../services/taskQueue');
 const logger = require('../utils/logger');
-const config = require('../../config');
 const { createGroup } = require('../services/groupCreationService');
+const { writeInviteLog } = require('../utils/inviteLogger'); // Import the log writer
 
 const sanitizePhoneNumber = (num) => {
     if (!num) return null;
     const cleaned = String(num).replace(/\D/g, '');
-    if (cleaned.length >= 11) {
-        return `${cleaned}@s.whatsapp.net`;
-    } else if (cleaned.length === 10) {
-        logger.warn(`Assuming country code '91' for 10-digit number: ${cleaned}`);
-        return `91${cleaned}@s.whatsapp.net`;
-    }
+    if (cleaned.length >= 11) return `${cleaned}@s.whatsapp.net`;
+    if (cleaned.length === 10) return `91${cleaned}@s.whatsapp.net`;
     logger.warn(`Skipping invalid or incomplete phone number: ${num}`);
     return null;
 };
 
+const readCsvPromise = (filePath) => {
+    return new Promise((resolve, reject) => {
+        const rows = [];
+        const mapHeaders = ({ header }) => header.toLowerCase().replace(/[\s-]+/g, '_');
+        fs.createReadStream(filePath)
+            .pipe(csv({ mapHeaders }))
+            .on('data', (data) => rows.push(data))
+            .on('end', () => {
+                fs.unlinkSync(filePath);
+                resolve(rows);
+            })
+            .on('error', (err) => reject(err));
+    });
+};
 
-function processCsvFile(filePath, username) {
-    const rows = [];
-    const mapHeaders = ({ header }) => header.toLowerCase().replace(/[\s-]+/g, '_');
+exports.uploadContacts = async (req, res) => {
+    const username = req.session.user.username;
+    if (!req.file) {
+        return res.status(400).json({ message: 'No file uploaded.' });
+    }
 
-    fs.createReadStream(filePath)
-        .pipe(csv({ mapHeaders }))
-        .on('data', (data) => rows.push(data))
-        .on('end', async () => {
-            fs.unlinkSync(filePath);
-            
-            // --- THIS IS THE FIX for UI SYNC ---
-            // Create a unique ID for this specific batch of tasks.
-            const batchId = uuidv4();
-            logger.info(`Queuing ${rows.length} tasks for user ${username} with batch ID: ${batchId}`);
-            
-            for (const [index, row] of rows.entries()) {
-                // ... (logic to create groupName and participants)
-                const bookingId = row.booking_id;
-                const propertyName = row.property_name;
-                const checkIn = row.check_in;
-                
-                let groupName;
-                if (bookingId && propertyName && checkIn) {
-                    groupName = `${bookingId} - ${propertyName} - ${checkIn}`;
-                } else {
-                    groupName = `Group_Row_${index + 1}_${Date.now()}`;
-                }
-                
-                const adminNumber = row.admin_number;
-                const semNumber = row.sem_number;
-                const contactNumber = row.contact;
-                
-                const allNumbers = [adminNumber, semNumber, contactNumber].filter(Boolean);
-                const participants = [...new Set(allNumbers.map(sanitizePhoneNumber).filter(Boolean))];
-                const adminJid = sanitizePhoneNumber(adminNumber);
-
-                if (participants.length > 0) {
-                    taskQueue.addTask({
-                        username,
-                        groupName,
-                        participants,
-                        adminJid,
-                        index: index + 1,
-                        total: rows.length,
-                        batchId // Associate each task with this batch
-                    });
-                }
-            }
-            // The 'upload_complete' event is no longer sent from here.
-            // It will be sent by the whatsappService when the batch is truly finished.
+    try {
+        const rows = await readCsvPromise(req.file.path);
+        const batchId = uuidv4();
+        
+        res.status(202).json({
+            message: 'File queued for processing.',
+            batchId: batchId,
+            total: rows.length
         });
-}
+        
+        let queuedCount = 0;
+        for (const [index, row] of rows.entries()) {
+            const bookingId = row.booking_id;
+            const propertyName = row.property_name;
+            const checkIn = row.check_in;
+            
+            const groupName = (bookingId && propertyName && checkIn)
+                ? `${bookingId} - ${propertyName} - ${checkIn}`
+                : `Group_Row_${index + 1}_${Date.now()}`;
 
-// Manual Group Creation (No changes)
+            const allNumbers = [row.admin_number, row.sem_number, row.contact].filter(Boolean);
+            const participants = [...new Set(allNumbers.map(sanitizePhoneNumber).filter(Boolean))];
+            
+            // --- FIX #1 & #3: Enforce minimum members and log failures ---
+            if (participants.length < 2) {
+                logger.warn(`Skipping group "${groupName}": requires at least 2 valid members, but found ${participants.length}.`);
+                writeInviteLog(username, groupName, '', 'Failed', `Skipped: Not enough valid members found (${participants.length}).`);
+                continue; // Skip to the next row
+            }
+            
+            queuedCount++;
+            taskQueue.addTask({
+                username, groupName, participants, batchId,
+                adminJid: sanitizePhoneNumber(row.admin_number),
+                index: index + 1,
+                total: rows.length,
+            });
+        }
+        
+        // --- FIX #2: Handle UI for batches with no valid tasks ---
+        if (rows.length > 0 && queuedCount === 0) {
+            logger.info(`Batch ${batchId} for user ${username} had no valid rows to queue.`);
+            const userSocketId = global.userSockets?.[username];
+            if (userSocketId) {
+                global.io.to(userSocketId).emit('batch_complete', {
+                    successCount: 0,
+                    failedCount: rows.length,
+                    total: rows.length,
+                    batchId: batchId
+                });
+            }
+        }
+        
+    } catch (error) {
+        logger.error('Error processing CSV file:', error);
+    }
+};
+
+
+// --- Manual Group Creation and Log functions are unchanged ---
 exports.createManualGroup = async (req, res) => {
     const { groupName, numbers, desiredAdminNumber } = req.body;
     const username = req.session.user.username;
@@ -96,18 +118,6 @@ exports.createManualGroup = async (req, res) => {
     }
 };
 
-// Upload Contacts (No changes)
-exports.uploadContacts = (req, res) => {
-    const username = req.session.user.username;
-    if (!req.file) {
-        return res.status(400).json({ message: 'No file uploaded.' });
-    }
-    res.status(202).json({ message: 'File queued. Groups will be created in the background.' });
-    processCsvFile(req.file.path, username);
-};
-
-
-// Log File Management (no changes)
 exports.listLogs = (req, res) => {
     const logDir = path.join(config.paths.data, 'invite-logs');
     const username = req.session.user.username;

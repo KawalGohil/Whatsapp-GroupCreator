@@ -85,14 +85,10 @@ async function closeBaileysClient(username) {
 }
 
 async function processQueueForUser(username) {
-    if (processingUsers.has(username)) {
-        return;
-    }
+    if (processingUsers.has(username)) return;
 
     const client = getClient(username);
-    if (!client || !client.user) {
-        return;
-    }
+    if (!client || !client.user) return;
 
     processingUsers.add(username);
     logger.info(`Starting queue processing for user: ${username}`);
@@ -105,67 +101,60 @@ async function processQueueForUser(username) {
             const [task] = taskQueue.queue.splice(taskIndex, 1);
             const userSocketId = global.userSockets?.[task.username];
 
-            const state = readState();
-            if (state.createdGroups[task.username]?.[task.groupName]) {
-                logger.info(`Group "${task.groupName}" already created. Skipping.`);
-                if (userSocketId) {
-                    global.io.to(userSocketId).emit('upload_progress', {
-                        current: task.index, total: task.total, currentGroup: `${task.groupName} (Skipped)`
-                    });
-                }
-                
-                // Update batch progress for skipped task
-                const tracker = batchTrackers[task.batchId];
-                if (tracker) {
-                    tracker.processed++;
-                    if (tracker.processed === tracker.total) {
-                         if (userSocketId) {
-                            global.io.to(userSocketId).emit('batch_complete', {
-                                successCount: tracker.successCount,
-                                failedCount: tracker.failedCount,
-                                total: tracker.total,
-                            });
-                        }
-                        delete batchTrackers[task.batchId];
-                    }
-                }
-                continue;
-            }
-            
+            // Initialize tracker for this batch if it's the first task
             if (!batchTrackers[task.batchId]) {
                 batchTrackers[task.batchId] = {
                     total: task.total, processed: 0, successCount: 0, failedCount: 0,
                 };
             }
-
-            let success = false;
-            try {
-                await createGroup(client, task.username, task.groupName, task.participants, task.adminJid);
-                success = true;
-            } catch (error) {
-                logger.error(`Task failed for group "${task.groupName}": ${error.message}`);
-            }
-
             const tracker = batchTrackers[task.batchId];
-            tracker.processed++;
-            if (success) tracker.successCount++;
-            else tracker.failedCount++;
-            
-            if (userSocketId) {
-                global.io.to(userSocketId).emit('upload_progress', {
-                    current: tracker.processed, total: tracker.total, currentGroup: task.groupName
-                });
+
+            const state = readState();
+            if (state.createdGroups[task.username]?.[task.groupName]) {
+                logger.info(`Group "${task.groupName}" already created. Skipping.`);
+                tracker.processed++;
+                tracker.failedCount++; // Count skips as "failed" for reporting purposes
+
+                if (userSocketId) {
+                    global.io.to(userSocketId).emit('upload_progress', {
+                        current: tracker.processed, total: tracker.total,
+                        currentGroup: `${task.groupName} (Skipped)`,
+                        batchId: task.batchId // --- ADDED BATCH ID ---
+                    });
+                }
+            } else {
+                let success = false;
+                try {
+                    await createGroup(client, task.username, task.groupName, task.participants, task.adminJid);
+                    success = true;
+                } catch (error) {
+                    logger.error(`Task failed for group "${task.groupName}": ${error.message}`);
+                }
+                
+                tracker.processed++;
+                if (success) tracker.successCount++;
+                else tracker.failedCount++;
+
+                if (userSocketId) {
+                    global.io.to(userSocketId).emit('upload_progress', {
+                        current: tracker.processed, total: tracker.total,
+                        currentGroup: task.groupName,
+                        batchId: task.batchId // --- ADDED BATCH ID ---
+                    });
+                }
             }
 
+            // If all tasks in the batch are processed, send the final confirmation
             if (tracker.processed === tracker.total) {
                 if (userSocketId) {
                     global.io.to(userSocketId).emit('batch_complete', {
                         successCount: tracker.successCount,
                         failedCount: tracker.failedCount,
                         total: tracker.total,
+                        batchId: task.batchId // --- ADDED BATCH ID ---
                     });
                 }
-                delete batchTrackers[task.batchId];
+                delete batchTrackers[task.batchId]; // Clean up tracker
             }
         }
     } finally {
