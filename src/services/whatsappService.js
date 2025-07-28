@@ -1,107 +1,87 @@
+// src/services/whatsappService.js
 const { default: makeWASocket, useMultiFileAuthState, DisconnectReason, Browsers } = require('@whiskeysockets/baileys');
 const { Boom } = require('@hapi/boom');
 const path = require('path');
-const fs = require('fs');
-const qrcode = require('qrcode-terminal');
-const logger = require('../utils/logger');
 const config = require('../../config');
+const logger = require('../utils/logger');
+const taskQueue = require('./taskQueue');
+const { createGroup } = require('./groupCreationService');
+const fs = require('fs');
 
-const clients = {}; // Stores active Baileys sockets
+let sock = null;
+const SESSION_FILE_PATH = path.join(config.paths.session, 'main-session');
 
-/**
- * Starts and manages a Baileys WhatsApp client instance for a given user.
- * @param {string} clientId The username to identify the session.
- */
-async function startBaileysClient(clientId) {
-    const sessionDir = path.join(config.paths.session, clientId);
-    const { state, saveCreds } = await useMultiFileAuthState(sessionDir);
-
-    const sock = makeWASocket({
+async function startMainClient() {
+    logger.info('Initializing main WhatsApp client...');
+    const { state, saveCreds } = await useMultiFileAuthState(SESSION_FILE_PATH);
+    
+    sock = makeWASocket({
         auth: state,
-        printQRInTerminal: true, // A fallback if the QR isn't sent to the frontend
+        printQRInTerminal: true,
         browser: Browsers.macOS('Desktop'),
-        logger: require('pino')({ level: 'silent' }) // Suppress Baileys' own noisy logging
+        logger: require('pino')({ level: 'silent' })
     });
-
-    clients[clientId] = sock;
-
-     let connectionTimeout = setTimeout(() => {
-        const socketId = global.userSockets?.[clientId];
-        if (sock.ws.readyState !== sock.ws.OPEN && socketId) {
-            logger.error(`Connection timed out for ${clientId}.`);
-            global.io.to(socketId).emit('status', 'Connection timed out. Please refresh.');
-            sock.ws.close(); // Close the WebSocket connection attempt
-        }
-    }, 45000); // 45-second timeout
 
     sock.ev.on('connection.update', (update) => {
         const { connection, lastDisconnect, qr } = update;
-        const socketId = global.userSockets?.[clientId];
-
-        if (connection === 'open' || connection === 'close' || qr) {
-            clearTimeout(connectionTimeout);
-        }
-
-        if (qr && socketId) {
-            logger.info(`QR code available for ${clientId}, sending to frontend.`);
-            global.io.to(socketId).emit('qr', qr);
+        if (qr) {
+            logger.info('QR code generated for main client. Scan with WhatsApp!');
         }
 
         if (connection === 'close') {
             const shouldReconnect = new Boom(lastDisconnect?.error)?.output?.statusCode !== DisconnectReason.loggedOut;
-            logger.error(`Connection closed for ${clientId}. Reconnecting: ${shouldReconnect}`);
-
+            logger.error('Main client connection closed. Reconnecting:', shouldReconnect);
             if (shouldReconnect) {
-                startBaileysClient(clientId);
+                startMainClient();
             } else {
-                logger.info(`Not reconnecting ${clientId}, user logged out.`);
-                fs.rmSync(sessionDir, { recursive: true, force: true });
-                delete clients[clientId];
+                logger.error('Main client logged out. Delete the "main-session" folder to generate a new QR code.');
             }
         } else if (connection === 'open') {
-            logger.info(`WhatsApp connection opened for ${clientId}`);
-            if (socketId) global.io.to(socketId).emit('status', 'Client is ready!');
+            logger.info('Main WhatsApp client connected successfully.');
+            taskQueue.emit('client_ready');
         }
     });
 
     sock.ev.on('creds.update', saveCreds);
+}
 
+function getMainClient() {
     return sock;
 }
 
-function getClient(clientId) {
-    return clients[clientId];
-}
+async function processQueue() {
+    if (taskQueue.isProcessing || taskQueue.queue.length === 0) return;
+    
+    const client = getMainClient();
+    if (!client || client.ws.readyState !== 1) { // 1 means WebSocket is OPEN
+        logger.warn('Client not ready, waiting to process queue.');
+        return;
+    }
 
-function closeBaileysClient(clientId) {
-    const sock = clients[clientId];
-    if (sock) {
-        logger.info(`Closing Baileys client for ${clientId}.`);
-        // This gracefully disconnects the socket but leaves auth files intact.
-        sock.ev.removeAllListeners('connection.update');
-        sock.end(undefined);
-        delete clients[clientId];
-
-        // --- THIS BLOCK SHOULD BE REMOVED ---
-        // Do NOT delete the session directory on logout.
-        /*
-        const sessionDir = path.join(config.paths.session, clientId);
-        if (fs.existsSync(sessionDir)) {
-            fs.rmSync(sessionDir, { recursive: true, force: true });
-            logger.info(`Removed session directory for ${clientId}.`);
+    taskQueue.isProcessing = true;
+    const task = taskQueue.getNextTask();
+    
+    try {
+        await createGroup(client, task.username, task.groupName, task.participants, task.adminJid);
+        if (global.io && global.userSockets[task.username]) {
+            global.io.to(global.userSockets[task.username]).emit('upload_progress', { current: task.index, total: task.total, currentGroup: task.groupName });
         }
-        */
+    } catch (error) {
+        logger.error(`Failed to process task for group "${task.groupName}": ${error.message}`);
+    } finally {
+        taskQueue.isProcessing = false;
+        // Immediately try to process the next item in the queue
+        process.nextTick(processQueue);
     }
 }
 
-// This function can be expanded later to automatically restart sessions on server startup
-function initializeWhatsAppClients() {
-    logger.info('WhatsApp service initialized.');
+// Listen for events to start processing the queue
+taskQueue.on('new_task', processQueue);
+taskQueue.on('client_ready', processQueue);
+
+// This function is no longer needed but we keep it to avoid breaking other files temporarily.
+function closeBaileysClient(clientId) {
+    logger.info(`User ${clientId} logged out. The main client remains active.`);
 }
 
-module.exports = {
-    startBaileysClient,
-    getClient,
-    closeBaileysClient,
-    initializeWhatsAppClients,
-};
+module.exports = { startMainClient, getMainClient, closeBaileysClient };

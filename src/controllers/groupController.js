@@ -2,7 +2,7 @@ const fs = require('fs');
 const path = require('path');
 const csv = require('csv-parser');
 const { getClient } = require('../services/whatsappService');
-const { createGroup } = require('../services/groupCreationService');
+const taskQueue = require('../services/taskQueue');
 const logger = require('../utils/logger');
 const config = require('../../config');
 
@@ -50,61 +50,47 @@ exports.createManualGroup = async (req, res) => {
 // --- Upload Logic (Updated) ---
 exports.uploadContacts = (req, res) => {
     const username = req.session.user.username;
-    const sock = getClient(username);
-    if (!sock || !req.file) {
-        return res.status(400).json({ message: 'Client not ready or no file uploaded.' });
+    if (!req.file) {
+        return res.status(400).json({ message: 'No file uploaded.' });
     }
-    res.status(202).json({ message: 'File uploaded. Processing will continue in the background.' });
-    processCsvFile(req.file.path, sock, username);
+    res.status(202).json({ message: 'File queued. Groups will be created in the background.' });
+    processCsvFile(req.file.path, username);
 };
 
-async function processCsvFile(filePath, sock, username) {
+async function processCsvFile(filePath, username) { // No longer takes `sock`
     const rows = [];
     fs.createReadStream(filePath)
         .pipe(csv({ mapHeaders: ({ header }) => header.toLowerCase() }))
         .on('data', (data) => rows.push(data))
         .on('end', async () => {
             fs.unlinkSync(filePath);
-            logger.info(`Processing ${rows.length} groups from CSV for user ${username}.`);
-
-            let successCount = 0;
+            logger.info(`Adding ${rows.length} group creation tasks to queue for user ${username}.`);
+            let queuedCount = 0;
             let failedCount = 0;
 
             for (const [index, row] of rows.entries()) {
-                let groupName;
+                // ... (your existing logic to parse the row data) ...
                 try {
-                    const bookingId = row['booking id']?.trim();
-                    const propertyName = row['property name']?.trim();
-                    const checkIn = row['check-in']?.trim();
-
-                    if (!bookingId || !propertyName || !checkIn) throw new Error('Row missing required name fields.');
-                    groupName = `${bookingId} - ${propertyName} - ${checkIn}`;
-
-                    const participants = [];
-                    for (const key in row) {
-                        if (key.includes('number') || key.includes('contact')) {
-                            const phoneValue = row[key]?.trim();
-                            if (phoneValue) participants.push(sanitizePhoneNumber(phoneValue));
-                        }
-                    }
+                    // ...
                     
-                    const uniqueParticipants = [...new Set(participants.filter(Boolean))];
-                    
-                    // **FIX**: Correctly find and sanitize the admin number from the 'admin number' column
-                    const adminJid = sanitizePhoneNumber(row['admin number']?.trim());
-
-                    if (uniqueParticipants.length === 0) throw new Error('No valid participants found.');
-                    
-                    await createGroup(sock, username, groupName, uniqueParticipants, adminJid);
-                    successCount++; // Increment success counter
-                    
-                    global.io.to(global.userSockets[username]).emit('upload_progress', { current: index + 1, total: rows.length, currentGroup: groupName });
+                    // --- REPLACE createGroup call with this ---
+                    taskQueue.addTask({
+                        username,
+                        groupName,
+                        participants: uniqueParticipants,
+                        adminJid,
+                        index: index + 1, // Use 1-based index for the UI
+                        total: rows.length
+                    });
+                    queuedCount++;
                 } catch (error) {
-                    failedCount++; // Increment failure counter
-                    logger.error(`Failed to process row ${index + 1} (${groupName || 'Unknown'}): ${error.message}`);
+                    failedCount++;
+                    logger.error(`Failed to queue row ${index + 1}: ${error.message}`);
                 }
             }
-            global.io.to(global.userSockets[username]).emit('upload_complete', { successCount, failedCount, total: rows.length });
+            if (global.io && global.userSockets[username]) {
+                global.io.to(global.userSockets[username]).emit('upload_complete', { successCount: queuedCount, failedCount, total: rows.length });
+            }
         });
 }
 

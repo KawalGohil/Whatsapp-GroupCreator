@@ -240,10 +240,11 @@ button:hover {
     height: 150px;
     border-radius: 50%;
     position: relative;
-    display: grid; /* This and the next line are for centering the text */
+    display: grid; /* Used to center the percentage text */
     place-items: center;
+    /* This creates the pie chart effect */
     background: conic-gradient(var(--primary-color) 0deg, #e5e5e5 0deg);
-    transition: background 0.2s linear;
+    transition: background 0.2s linear; /* Smooths the animation */
 }
 
 /* This creates the inner white circle */

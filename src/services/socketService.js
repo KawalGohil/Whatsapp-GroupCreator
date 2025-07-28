@@ -4,6 +4,7 @@ const { startBaileysClient, getClient } = require('./whatsappService');
 const path = require('path');
 const config = require('../../config'); 
 const fs = require('fs');
+const { getMainClient } = require('./whatsappService');
 
 // This object will map a username to their active socket ID
 global.userSockets = {};
@@ -56,6 +57,15 @@ function initializeSocket(server, sessionMiddleware) {
             // No client and no session files means we need a new QR scan.
             logger.info(`No active client or session for ${username}. Starting new Baileys session.`);
             startBaileysClient(username);
+        }
+
+        const mainClient = getMainClient();
+        if (mainClient && mainClient.ws.readyState === 1) { // 1 means OPEN
+            logger.info('Main client is ready, notifying user.');
+            socket.emit('status', 'Client is ready!');
+        } else {
+            logger.warn('Main client not connected. User may need to scan QR from server console.');
+            socket.emit('status', 'Server client is not connected. Please contact admin.');
         }
 
         socket.on('disconnect', (reason) => {

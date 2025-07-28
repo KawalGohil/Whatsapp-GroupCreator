@@ -6,7 +6,7 @@ const SQLiteStore = require('connect-sqlite3')(session);
 const config = require('./config');
 const logger = require('./src/utils/logger');
 const { initializeSocket } = require('./src/services/socketService');
-const { initializeWhatsAppClients } = require('./src/services/whatsappService');
+const { startMainClient } = require('./src/services/mainWhatsappClient');
 
 const authRoutes = require('./src/routes/authRoutes');
 const groupRoutes = require('./src/routes/groupRoutes');
@@ -35,7 +35,7 @@ app.use(sessionMiddleware);
 // --- Initialize Services ---
 const io = initializeSocket(server, sessionMiddleware);
 global.io = io; // Make io accessible globally
-initializeWhatsAppClients(); // Manages all Baileys instances
+startMainClient();
 
 // --- API Routes ---
 app.use('/api/auth', authRoutes);

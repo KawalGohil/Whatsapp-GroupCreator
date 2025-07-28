@@ -144,7 +144,7 @@ window.addEventListener('DOMContentLoaded', () => {
     // This is the key fix: It tells the gray color to start where the blue one ends.
     $ppc.style.background = `conic-gradient(var(--primary-color) ${degrees}deg, #e5e5e5 ${degrees}deg)`;
     $span.textContent = `${percentage}%`;
-
+    
     // Calculate and display time remaining
     const elapsedMs = Date.now() - progressState.startTime;
     const avgTimePerGroup = elapsedMs / data.current;
