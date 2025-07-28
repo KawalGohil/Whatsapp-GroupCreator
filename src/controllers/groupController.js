@@ -79,13 +79,16 @@ exports.uploadContacts = async (req, res) => {
             });
         }
         
+        // --- THIS IS THE FIX ---
+        // If the file had rows but nothing was queued, it means all rows were invalid.
+        // We must manually inform the UI that this "batch" is complete.
         if (rows.length > 0 && queuedCount === 0) {
-            logger.info(`Batch ${batchId} for user ${username} had no valid rows to queue.`);
+            logger.info(`Batch ${batchId} for user ${username} had no valid rows to queue. Notifying UI.`);
             const userSocketId = global.userSockets?.[username];
             if (userSocketId) {
                 global.io.to(userSocketId).emit('batch_complete', {
                     successCount: 0,
-                    failedCount: rows.length,
+                    failedCount: rows.length, // All rows failed
                     total: rows.length,
                     batchId: batchId
                 });
