@@ -4,12 +4,12 @@ const { Boom } = require('@hapi/boom');
 const path = require('path');
 const config = require('../../config');
 const logger = require('../utils/logger');
-const taskQueue = require('./taskQueue');
+const taskQueue = require('../services/taskQueue');
 const { createGroup } = require('./groupCreationService');
 const pino = require('pino');
 
 const activeClients = {};
-const processingUsers = new Set(); // Tracks which user's queue is currently being processed
+const processingUsers = new Set();
 
 async function startBaileysClient(username) {
     if (activeClients[username]) {
@@ -41,6 +41,7 @@ async function startBaileysClient(username) {
         if (connection === 'close') {
             const shouldReconnect = new Boom(lastDisconnect?.error)?.output?.statusCode !== DisconnectReason.loggedOut;
             logger.error(`Connection for ${username} closed. Reconnecting: ${shouldReconnect}`);
+            
             delete activeClients[username];
             if (shouldReconnect) {
                 setTimeout(() => startBaileysClient(username), 5000);
@@ -78,23 +79,23 @@ async function processQueueForUser(username) {
     }
 
     const client = getClient(username);
-    if (!client || client.ws.readyState !== 1) {
-        logger.warn(`Queue check for ${username} triggered, but client is not ready. Will try again upon connection.`);
+    
+    // A more reliable check: The 'user' property is only set after a successful
+    // login and connection. This avoids the race condition with ws.readyState.
+    if (!client || !client.user) {
+        logger.warn(`Queue check for ${username} triggered, but client is not fully authenticated yet.`);
         return;
     }
 
     processingUsers.add(username);
-    logger.info(`Starting queue processing loop for user: ${username}`);
+    logger.info(`Starting queue processing for user: ${username}`);
 
     try {
-        while (true) {
-            const taskIndex = taskQueue.queue.findIndex(t => t.username === username);
-            if (taskIndex === -1) {
-                break; // No more tasks for this user
-            }
-
+        let taskIndex;
+        while ((taskIndex = taskQueue.queue.findIndex(t => t.username === username)) !== -1) {
             const [task] = taskQueue.queue.splice(taskIndex, 1);
-            logger.info(`Processing task for group "${task.groupName}"`);
+            
+            logger.info(`Processing group "${task.groupName}"`);
 
             try {
                 await createGroup(client, task.username, task.groupName, task.participants, task.adminJid);
@@ -109,18 +110,14 @@ async function processQueueForUser(username) {
         }
     } finally {
         processingUsers.delete(username);
-        logger.info(`Finished queue processing loop for user: ${username}`);
+        logger.info(`Finished queue processing for user: ${username}`);
     }
 }
 
-// This event listener ensures that if a file is uploaded while the client is
-// already connected, the queue is processed immediately.
 taskQueue.on('new_task', (username) => {
-    logger.info(`New task added for user: ${username}. Triggering queue check.`);
+    logger.info(`New task for ${username} received. Triggering queue check.`);
     processQueueForUser(username);
 });
-// --- END OF FIX ---
-
 
 module.exports = { 
     startBaileysClient,
