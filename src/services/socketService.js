@@ -26,10 +26,17 @@ function initializeSocket(server, sessionMiddleware) {
 
         const username = session.user.username;
         const oldSocketId = global.userSockets[username];
-
         if (oldSocketId && oldSocketId !== socket.id) {
             logger.info(`User ${username} connected with a new socket. Disconnecting old one.`);
-            io.to(oldSocketId).disconnect();
+            
+            // --- THIS IS THE FIX ---
+            // Get the actual socket instance from the server's list of connected sockets
+            // and then call disconnect on it.
+            const oldSocket = io.sockets.sockets.get(oldSocketId);
+            if (oldSocket) {
+                oldSocket.disconnect(true);
+            }
+            // --- END OF FIX ---
         }
 
         global.userSockets[username] = socket.id;
