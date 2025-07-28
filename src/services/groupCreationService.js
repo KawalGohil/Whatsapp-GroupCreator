@@ -64,7 +64,11 @@ async function createGroupWithBaileys(sock, username, groupName, participants, a
     const group = await sock.groupCreate(groupName, confirmedParticipants);
     logger.info(`Baileys: Group "${groupName}" created with ID: ${group.id}`);
 
-    // **FIX & ENHANCED LOGGING**: This block now has better checks and logs for admin promotion.
+    // --- FIX IS HERE ---
+    // The inviteLink variable is now defined before the try/catch block for admin promotion
+    const inviteCode = await sock.groupInviteCode(group.id);
+    const inviteLink = `https://chat.whatsapp.com/${inviteCode}`;
+
     if (adminJid) {
         if (confirmedParticipants.includes(adminJid)) {
             logger.info(`Attempting to promote ${adminJid} to admin...`);
@@ -74,21 +78,18 @@ async function createGroupWithBaileys(sock, username, groupName, participants, a
                 logger.info(`Successfully promoted ${adminJid} to admin in group "${groupName}".`);
             } catch (e) {
                 logger.error(`Failed to promote admin ${adminJid}: ${e.message}`);
-                // --- ADD THIS LINE ---
-                // This logs the failure so the user is aware.
                 writeInviteLog(username, groupName, inviteLink, 'Success (Admin Promotion Failed)', e.message);
             }
         } else {
             logger.warn(`Admin JID ${adminJid} was not in the final list of confirmed participants. Cannot promote.`);
         }
     }
+    // --- END OF FIX ---
 
     await delay(2000);
-    const inviteCode = await sock.groupInviteCode(group.id);
-    const inviteLink = `https://chat.whatsapp.com/${inviteCode}`;
     
     writeInviteLog(username, groupName, inviteLink, 'Success');
-    emitLogUpdated(username); // Notifies frontend to refresh logs
+    emitLogUpdated(username);
     
     state.createdGroups[groupName] = group.id;
     writeState(state);

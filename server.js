@@ -6,6 +6,7 @@ const SQLiteStore = require('connect-sqlite3')(session);
 const config = require('./config');
 const logger = require('./src/utils/logger');
 const { initializeSocket } = require('./src/services/socketService');
+// No longer importing startMainClient
 const authRoutes = require('./src/routes/authRoutes');
 const groupRoutes = require('./src/routes/groupRoutes');
 

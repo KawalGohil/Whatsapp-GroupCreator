@@ -5,7 +5,7 @@ const { getClient } = require('../services/whatsappService');
 const taskQueue = require('../services/taskQueue');
 const logger = require('../utils/logger');
 const config = require('../../config');
-const { createGroup } = require('../services/groupCreationService'); // This is needed for manual creation
+const { createGroup } = require('../services/groupCreationService');
 
 const sanitizePhoneNumber = (num) => {
     if (!num) return null;
@@ -20,7 +20,7 @@ const sanitizePhoneNumber = (num) => {
     return null;
 };
 
-// Manual Group Creation
+// Manual Group Creation (No changes needed here)
 exports.createManualGroup = async (req, res) => {
     const { groupName, numbers, desiredAdminNumber } = req.body;
     const username = req.session.user.username;
@@ -33,9 +33,7 @@ exports.createManualGroup = async (req, res) => {
         const participants = numbers.split(/[,\n]/).map(sanitizePhoneNumber).filter(Boolean);
         const adminJid = sanitizePhoneNumber(desiredAdminNumber);
 
-        // For manual, we can create it directly without the queue
         await createGroup(sock, username, groupName, participants, adminJid);
-
         res.status(200).json({ message: `Group "${groupName}" creation initiated.` });
     } catch (error) {
         logger.error(`Manual group creation failed for ${username}:`, error);
@@ -43,27 +41,18 @@ exports.createManualGroup = async (req, res) => {
     }
 };
 
-// Upload Logic
-exports.uploadContacts = (req, res) => {
-    const username = req.session.user.username;
-    if (!req.file) {
-        return res.status(400).json({ message: 'No file uploaded.' });
-    }
-    
-    // Immediately respond to the user
-    res.status(202).json({ message: 'File queued. Groups will be created in the background.' });
-    
-    // Process the file in the background
-    processCsvFile(req.file.path, username);
-};
-
+// --- THIS IS THE FIX ---
+// This function is updated to handle your specific CSV headers
 function processCsvFile(filePath, username) {
     const rows = [];
+    // Normalize headers to be lowercase and replace spaces with underscores
+    const mapHeaders = ({ header }) => header.toLowerCase().replace(/\s+/g, '_');
+
     fs.createReadStream(filePath)
-        .pipe(csv({ mapHeaders: ({ header }) => header.toLowerCase() }))
+        .pipe(csv({ mapHeaders }))
         .on('data', (data) => rows.push(data))
         .on('end', async () => {
-            fs.unlinkSync(filePath); // Clean up the uploaded file
+            fs.unlinkSync(filePath);
             logger.info(`Adding ${rows.length} group creation tasks to queue for user ${username}.`);
             
             let queuedCount = 0;
@@ -71,13 +60,18 @@ function processCsvFile(filePath, username) {
 
             for (const [index, row] of rows.entries()) {
                 try {
-                    const groupName = row.group_name || `Group ${Date.now()}`;
-                    const adminNumber = row.admin_number;
-                    const memberNumbers = (row.member_numbers || '').split(',').map(s => s.trim());
+                    // Use 'property_name' or a fallback for the group name
+                    const groupName = row.property_name || row.group_name || `Group_${Date.now()}`;
                     
-                    const allNumbers = [adminNumber, ...memberNumbers].filter(Boolean);
+                    // Get numbers from all potential member columns
+                    const adminNumber = row.admin_number;
+                    const semNumber = row.sem_number;
+                    const contactNumber = row.contact;
+
+                    const allNumbers = [adminNumber, semNumber, contactNumber].filter(Boolean);
+                    
                     if (allNumbers.length === 0) {
-                        logger.warn(`Skipping row ${index + 1} due to no valid numbers.`);
+                        logger.warn(`Skipping row ${index + 1} for group "${groupName}" due to no valid numbers.`);
                         failedToQueueCount++;
                         continue;
                     }
@@ -100,6 +94,7 @@ function processCsvFile(filePath, username) {
                     logger.error(`Failed to queue row ${index + 1}: ${error.message}`);
                 }
             }
+
             const userSocketId = global.userSockets?.[username];
             if (userSocketId) {
                 global.io.to(userSocketId).emit('upload_complete', { 
@@ -110,9 +105,21 @@ function processCsvFile(filePath, username) {
             }
         });
 }
+// --- END OF FIX ---
 
 
-// Log File Management (no changes needed here)
+// Upload Logic
+exports.uploadContacts = (req, res) => {
+    const username = req.session.user.username;
+    if (!req.file) {
+        return res.status(400).json({ message: 'No file uploaded.' });
+    }
+    res.status(202).json({ message: 'File queued. Groups will be created in the background.' });
+    processCsvFile(req.file.path, username);
+};
+
+
+// Log File Management (no changes)
 exports.listLogs = (req, res) => {
     const logDir = path.join(config.paths.data, 'invite-logs');
     const username = req.session.user.username;
