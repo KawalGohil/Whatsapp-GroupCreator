@@ -1,11 +1,12 @@
 // src/services/whatsappService.js
 const { default: makeWASocket, useMultiFileAuthState, DisconnectReason, Browsers } = require('@whiskeysockets/baileys');
 const { Boom } = require('@hapi/boom');
-const path =require('path');
+const path = require('path');
 const config = require('../../config');
 const logger = require('../utils/logger');
 const taskQueue = require('./taskQueue');
 const { createGroup } = require('./groupCreationService');
+const pino = require('pino'); // --- FIX: Add this line to import pino ---
 
 const activeClients = {};
 
@@ -46,15 +47,12 @@ async function startBaileysClient(username) {
                 setTimeout(() => startBaileysClient(username), 5000);
             } else {
                 logger.error(`${username} logged out of WhatsApp. Session data will be cleared.`);
-                // Clean up the session directory if logged out
-                // fs.rmdirSync(sessionPath, { recursive: true });
             }
         } else if (connection === 'open') {
             logger.info(`Client for ${username} connected successfully.`);
             if (userSocketId) {
                 global.io.to(userSocketId).emit('status', 'Client is ready!');
             }
-            // Trigger queue processing for this user
             processQueue();
         }
     });
@@ -80,33 +78,32 @@ async function processQueue() {
         return;
     }
     
-    const task = taskQueue.queue[0]; // Peek at the task without removing it
+    const task = taskQueue.queue[0];
     const client = getClient(task.username);
 
-    // Only process if the user's client is connected and ready
     if (!client || client.ws.readyState !== 1) {
         logger.warn(`Client for ${task.username} not ready. Queue processing paused for this user.`);
         return;
     }
 
     taskQueue.isProcessing = true;
-    taskQueue.getNextTask(); // Now remove the task
+    const confirmedTask = taskQueue.getNextTask();
 
-    logger.info(`Processing task for group "${task.groupName}" for user "${task.username}"`);
+    logger.info(`Processing task for group "${confirmedTask.groupName}" for user "${confirmedTask.username}"`);
 
     try {
-        await createGroup(client, task.username, task.groupName, task.participants, task.adminJid);
+        await createGroup(client, confirmedTask.username, confirmedTask.groupName, confirmedTask.participants, confirmedTask.adminJid);
         
-        const userSocketId = global.userSockets?.[task.username];
+        const userSocketId = global.userSockets?.[confirmedTask.username];
         if (userSocketId) {
             global.io.to(userSocketId).emit('upload_progress', {
-                current: task.index,
-                total: task.total,
-                currentGroup: task.groupName
+                current: confirmedTask.index,
+                total: confirmedTask.total,
+                currentGroup: confirmedTask.groupName
             });
         }
     } catch (error) {
-        logger.error(`Failed to process task for group "${task.groupName}": ${error.message}`);
+        logger.error(`Failed to process task for group "${confirmedTask.groupName}": ${error.message}`);
     } finally {
         taskQueue.isProcessing = false;
         process.nextTick(processQueue);

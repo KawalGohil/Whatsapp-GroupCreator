@@ -6,7 +6,6 @@ const SQLiteStore = require('connect-sqlite3')(session);
 const config = require('./config');
 const logger = require('./src/utils/logger');
 const { initializeSocket } = require('./src/services/socketService');
-const { startMainClient } = require('./src/services/whatsappService');
 const authRoutes = require('./src/routes/authRoutes');
 const groupRoutes = require('./src/routes/groupRoutes');
 
@@ -34,7 +33,6 @@ app.use(sessionMiddleware);
 // --- Initialize Services ---
 const io = initializeSocket(server, sessionMiddleware);
 global.io = io; // Make io accessible globally
-startMainClient();
 
 // --- API Routes ---
 app.use('/api/auth', authRoutes);
