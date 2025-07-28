@@ -1,6 +1,7 @@
 const fs = require('fs');
 const path = require('path');
 const csv = require('csv-parser');
+const { v4: uuidv4 } = require('uuid'); // Import UUID to create a unique ID for each batch
 const { getClient } = require('../services/whatsappService');
 const taskQueue = require('../services/taskQueue');
 const logger = require('../utils/logger');
@@ -20,7 +21,61 @@ const sanitizePhoneNumber = (num) => {
     return null;
 };
 
-// Manual Group Creation (No changes needed)
+
+function processCsvFile(filePath, username) {
+    const rows = [];
+    const mapHeaders = ({ header }) => header.toLowerCase().replace(/[\s-]+/g, '_');
+
+    fs.createReadStream(filePath)
+        .pipe(csv({ mapHeaders }))
+        .on('data', (data) => rows.push(data))
+        .on('end', async () => {
+            fs.unlinkSync(filePath);
+            
+            // --- THIS IS THE FIX for UI SYNC ---
+            // Create a unique ID for this specific batch of tasks.
+            const batchId = uuidv4();
+            logger.info(`Queuing ${rows.length} tasks for user ${username} with batch ID: ${batchId}`);
+            
+            for (const [index, row] of rows.entries()) {
+                // ... (logic to create groupName and participants)
+                const bookingId = row.booking_id;
+                const propertyName = row.property_name;
+                const checkIn = row.check_in;
+                
+                let groupName;
+                if (bookingId && propertyName && checkIn) {
+                    groupName = `${bookingId} - ${propertyName} - ${checkIn}`;
+                } else {
+                    groupName = `Group_Row_${index + 1}_${Date.now()}`;
+                }
+                
+                const adminNumber = row.admin_number;
+                const semNumber = row.sem_number;
+                const contactNumber = row.contact;
+                
+                const allNumbers = [adminNumber, semNumber, contactNumber].filter(Boolean);
+                const participants = [...new Set(allNumbers.map(sanitizePhoneNumber).filter(Boolean))];
+                const adminJid = sanitizePhoneNumber(adminNumber);
+
+                if (participants.length > 0) {
+                    taskQueue.addTask({
+                        username,
+                        groupName,
+                        participants,
+                        adminJid,
+                        index: index + 1,
+                        total: rows.length,
+                        batchId // Associate each task with this batch
+                    });
+                }
+            }
+            // The 'upload_complete' event is no longer sent from here.
+            // It will be sent by the whatsappService when the batch is truly finished.
+        });
+}
+
+// Manual Group Creation (No changes)
 exports.createManualGroup = async (req, res) => {
     const { groupName, numbers, desiredAdminNumber } = req.body;
     const username = req.session.user.username;
@@ -41,83 +96,7 @@ exports.createManualGroup = async (req, res) => {
     }
 };
 
-// --- THIS IS THE FIX ---
-function processCsvFile(filePath, username) {
-    const rows = [];
-    // Normalize headers: lowercase and replace spaces/hyphens with underscores
-    const mapHeaders = ({ header }) => header.toLowerCase().replace(/[\s-]+/g, '_');
-
-    fs.createReadStream(filePath)
-        .pipe(csv({ mapHeaders }))
-        .on('data', (data) => rows.push(data))
-        .on('end', async () => {
-            fs.unlinkSync(filePath);
-            logger.info(`Adding ${rows.length} group creation tasks to queue for user ${username}.`);
-            
-            let queuedCount = 0;
-            let failedToQueueCount = 0;
-
-            for (const [index, row] of rows.entries()) {
-                try {
-                    // --- CONSTRUCT GROUP NAME FROM SPECIFIC COLUMNS ---
-                    const bookingId = row.booking_id;
-                    const propertyName = row.property_name;
-                    const checkIn = row.check_in;
-                    
-                    let groupName;
-                    if (bookingId && propertyName && checkIn) {
-                        groupName = `${bookingId} - ${propertyName} - ${checkIn}`;
-                    } else {
-                        // Fallback name if any of the required columns are missing
-                        groupName = `Group_Row_${index + 1}_${Date.now()}`;
-                        logger.warn(`Row ${index + 1} is missing required columns for group name. Using fallback: ${groupName}`);
-                    }
-                    
-                    const adminNumber = row.admin_number;
-                    const memberNumbers = (row.member_numbers || '').split(',').map(s => s.trim());
-                    const contactNumber = row.contact; // Adding 'contact' as a potential member column
-                    
-                    const allNumbers = [adminNumber, contactNumber, ...memberNumbers].filter(Boolean);
-                    
-                    if (allNumbers.length === 0) {
-                        logger.warn(`Skipping row ${index + 1} for group "${groupName}" due to no valid numbers.`);
-                        failedToQueueCount++;
-                        continue;
-                    }
-                    
-                    const participants = allNumbers.map(sanitizePhoneNumber).filter(Boolean);
-                    const uniqueParticipants = [...new Set(participants)];
-                    const adminJid = sanitizePhoneNumber(adminNumber);
-
-                    taskQueue.addTask({
-                        username,
-                        groupName,
-                        participants: uniqueParticipants,
-                        adminJid,
-                        index: index + 1,
-                        total: rows.length
-                    });
-                    queuedCount++;
-                } catch (error) {
-                    failedToQueueCount++;
-                    logger.error(`Failed to queue row ${index + 1}: ${error.message}`);
-                }
-            }
-
-            const userSocketId = global.userSockets?.[username];
-            if (userSocketId) {
-                global.io.to(userSocketId).emit('upload_complete', { 
-                    successCount: queuedCount, 
-                    failedCount: failedToQueueCount, 
-                    total: rows.length 
-                });
-            }
-        });
-}
-// --- END OF FIX ---
-
-
-// Upload Logic
+// Upload Contacts (No changes)
 exports.uploadContacts = (req, res) => {
     const username = req.session.user.username;
     if (!req.file) {

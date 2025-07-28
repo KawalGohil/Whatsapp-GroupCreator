@@ -1,8 +1,7 @@
-// src/services/whatsappService.js
 const { default: makeWASocket, useMultiFileAuthState, DisconnectReason, Browsers } = require('@whiskeysockets/baileys');
 const { Boom } = require('@hapi/boom');
 const path = require('path');
-const fs = require('fs'); // Import the file system module
+const fs = require('fs');
 const config = require('../../config');
 const logger = require('../utils/logger');
 const taskQueue = require('./taskQueue');
@@ -11,6 +10,7 @@ const pino = require('pino');
 
 const activeClients = {};
 const processingUsers = new Set();
+const batchTrackers = {};
 
 async function startBaileysClient(username) {
     if (activeClients[username]) {
@@ -89,14 +89,11 @@ async function closeBaileysClient(username) {
 
 async function processQueueForUser(username) {
     if (processingUsers.has(username)) {
-        logger.info(`Queue processing is already active for user: ${username}`);
         return;
     }
 
     const client = getClient(username);
-    
     if (!client || !client.user) {
-        logger.warn(`Queue check for ${username} triggered, but client is not fully authenticated yet.`);
         return;
     }
 
@@ -104,21 +101,54 @@ async function processQueueForUser(username) {
     logger.info(`Starting queue processing for user: ${username}`);
 
     try {
-        let taskIndex;
-        while ((taskIndex = taskQueue.queue.findIndex(t => t.username === username)) !== -1) {
+        while (true) {
+            const taskIndex = taskQueue.queue.findIndex(t => t.username === username);
+            if (taskIndex === -1) break;
+
             const [task] = taskQueue.queue.splice(taskIndex, 1);
             
-            logger.info(`Processing group "${task.groupName}"`);
+            // --- THIS IS THE FIX for UI SYNC ---
+            // Initialize a tracker for the batch if it's the first task
+            if (!batchTrackers[task.batchId]) {
+                batchTrackers[task.batchId] = {
+                    total: task.total,
+                    processed: 0,
+                    successCount: 0,
+                    failedCount: 0,
+                };
+            }
 
+            let success = false;
             try {
                 await createGroup(client, task.username, task.groupName, task.participants, task.adminJid);
-                if (global.userSockets?.[task.username]) {
-                    global.io.to(global.userSockets[task.username]).emit('upload_progress', {
-                        current: task.index, total: task.total, currentGroup: task.groupName
-                    });
-                }
+                success = true;
             } catch (error) {
                 logger.error(`Task failed for group "${task.groupName}": ${error.message}`);
+            }
+
+            // Update batch progress
+            const tracker = batchTrackers[task.batchId];
+            tracker.processed++;
+            if (success) tracker.successCount++;
+            else tracker.failedCount++;
+            
+            const userSocketId = global.userSockets?.[task.username];
+            if (userSocketId) {
+                global.io.to(userSocketId).emit('upload_progress', {
+                    current: tracker.processed, total: tracker.total, currentGroup: task.groupName
+                });
+            }
+
+            // If all tasks in the batch are processed, send the final confirmation
+            if (tracker.processed === tracker.total) {
+                if (userSocketId) {
+                    global.io.to(userSocketId).emit('batch_complete', {
+                        successCount: tracker.successCount,
+                        failedCount: tracker.failedCount,
+                        total: tracker.total,
+                    });
+                }
+                delete batchTrackers[task.batchId]; // Clean up tracker
             }
         }
     } finally {
@@ -128,7 +158,6 @@ async function processQueueForUser(username) {
 }
 
 taskQueue.on('new_task', (username) => {
-    logger.info(`New task for ${username} received. Triggering queue check.`);
     processQueueForUser(username);
 });
 

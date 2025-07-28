@@ -157,17 +157,17 @@ window.addEventListener('DOMContentLoaded', () => {
     uploadStatusText.innerHTML = `Processing group ${data.current} of ${data.total}: <b>${data.currentGroup}</b><br>Time remaining: ${timeString}`;
 });
 
-   socket.on('upload_complete', (data) => {
-    let message = `✅<br><b>Processing complete!</b><br>${data.successCount} of ${data.total} groups processed successfully.`;
-    if (data.failedCount > 0) {
-        message += `<br><span style="color: var(--error-color);">${data.failedCount} groups failed.</span>`;
-    }
-    uploadStatusText.innerHTML = message;
-    progressState = {}; // Reset state
-    setTimeout(() => {
-        uploadStatusSection.classList.add('hidden');
-    }, 8000); // Increased timeout to allow reading the message
-});
+    socket.on('batch_complete', (data) => {
+        let message = `✅<br><b>Processing complete!</b><br>${data.successCount} of ${data.total} groups processed successfully.`;
+        if (data.failedCount > 0) {
+            message += `<br><span style="color: var(--error-color);">${data.failedCount} groups failed.</span>`;
+        }
+        uploadStatusText.innerHTML = message;
+        progressState = {}; // Reset state for the next upload
+        setTimeout(() => {
+            uploadStatusSection.classList.add('hidden');
+        }, 8000);
+    });
 
     // --- Form Event Listeners ---
     loginForm.addEventListener('submit', async (e) => {

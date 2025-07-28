@@ -1,6 +1,8 @@
 const userModel = require('../models/userModel');
-const { startBaileysClient, closeBaileysClient } = require('../services/whatsappService');
+// --- FIX: closeBaileysClient is no longer called on logout ---
+const { startBaileysClient } = require('../services/whatsappService');
 const logger = require('../utils/logger');
+
 
 // User Registration
 exports.register = (req, res) => {
@@ -57,25 +59,18 @@ exports.login = (req, res) => {
     });
 };
 
-// User Logout
+// --- THIS IS THE FIX for FIRE AND FORGET ---
+// The Baileys client is no longer shut down on logout, allowing it to complete its queue.
 exports.logout = (req, res) => {
     const username = req.session.user?.username;
 
-    req.session.destroy(async (err) => { // Made the callback async
+    req.session.destroy((err) => {
         if (err) {
             logger.error('Error destroying session:', err);
             return res.status(500).json({ message: 'Logout failed.' });
         }
         
         if (username) {
-            // Added 'await' to ensure we wait for the client to close
-            // and can catch any errors if it fails.
-            try {
-                await closeBaileysClient(username);
-            } catch (closeErr) {
-                logger.error(`Error closing Baileys client for ${username}:`, closeErr);
-            }
-            
             const socketId = global.userSockets?.[username];
             if (socketId && global.io) {
                 const socket = global.io.sockets.sockets.get(socketId);
@@ -87,7 +82,7 @@ exports.logout = (req, res) => {
         }
 
         res.clearCookie('connect.sid');
-        logger.info(`User ${username || ''} logged out.`);
+        logger.info(`User ${username || ''} logged out of the web app. WhatsApp client continues to process queue.`);
         res.status(200).json({ message: 'Logged out successfully.' });
     });
 };
