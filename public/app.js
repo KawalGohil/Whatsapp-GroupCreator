@@ -130,32 +130,32 @@ window.addEventListener('DOMContentLoaded', () => {
     });
 
      socket.on('upload_progress', (data) => {
-        if (!progressState.startTime) {
-            progressState.startTime = Date.now();
-            progressState.total = data.total;
-        }
+    if (!progressState.startTime) {
+        progressState.startTime = Date.now();
+        progressState.total = data.total;
+    }
 
-        const percentage = Math.round((data.current / data.total) * 100);
-        
-        // Update pie chart
-        const $ppc = document.querySelector('.progress-pie-chart');
+    const percentage = Math.round((data.current / data.total) * 100);
+    const degrees = percentage * 3.6;
+    
+    const $ppc = document.querySelector('.progress-pie-chart');
     const $span = document.getElementById('progress-percentage');
     
-    // Update the conic-gradient background for the pie chart
-    $ppc.style.background = `conic-gradient(var(--primary-color) ${percentage * 3.6}deg, #e5e5e5 0deg)`;
+    // This is the key fix: It tells the gray color to start where the blue one ends.
+    $ppc.style.background = `conic-gradient(var(--primary-color) ${degrees}deg, #e5e5e5 ${degrees}deg)`;
     $span.textContent = `${percentage}%`;
 
-        // Calculate and display time remaining
-        const elapsedMs = Date.now() - progressState.startTime;
-        const avgTimePerGroup = elapsedMs / data.current;
-        const remainingGroups = data.total - data.current;
-        const remainingMs = Math.round(remainingGroups * avgTimePerGroup);
-        const remainingMinutes = Math.floor(remainingMs / 60000);
-        const remainingSeconds = Math.round((remainingMs % 60000) / 1000);
-        const timeString = remainingMinutes > 0 ? `~${remainingMinutes}m ${remainingSeconds}s` : `~${remainingSeconds}s`;
+    // Calculate and display time remaining
+    const elapsedMs = Date.now() - progressState.startTime;
+    const avgTimePerGroup = elapsedMs / data.current;
+    const remainingGroups = data.total - data.current;
+    const remainingMs = Math.round(remainingGroups * avgTimePerGroup);
+    const remainingMinutes = Math.floor(remainingMs / 60000);
+    const remainingSeconds = Math.round((remainingMs % 60000) / 1000);
+    const timeString = remainingMinutes > 0 ? `~${remainingMinutes}m ${remainingSeconds}s` : `~${remainingSeconds}s`;
 
-        uploadStatusText.innerHTML = `Processing group ${data.current} of ${data.total}: <b>${data.currentGroup}</b><br>Time remaining: ${timeString}`;
-    });
+    uploadStatusText.innerHTML = `Processing group ${data.current} of ${data.total}: <b>${data.currentGroup}</b><br>Time remaining: ${timeString}`;
+});
 
    socket.on('upload_complete', (data) => {
     let message = `✅<br><b>Processing complete!</b><br>${data.successCount} of ${data.total} groups processed successfully.`;
@@ -236,9 +236,7 @@ window.addEventListener('DOMContentLoaded', () => {
             uploadStatusText.textContent = 'Starting processing...';
             // Reset pie chart visuals
             const $ppc = document.querySelector('.progress-pie-chart');
-            $ppc.classList.remove('gt-50');
-            $ppc.dataset.percent = '0';
-            document.querySelector('.ppc-progress-fill').style.transform = 'rotate(0deg)';
+            $ppc.style.background = `conic-gradient(var(--primary-color) 0deg, #e5e5e5 0deg)`;
             document.getElementById('progress-percentage').textContent = '0%';
         }
 

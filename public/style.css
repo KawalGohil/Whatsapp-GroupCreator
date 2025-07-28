@@ -240,24 +240,24 @@ button:hover {
     height: 150px;
     border-radius: 50%;
     position: relative;
-    display: grid;
+    display: grid; /* This and the next line are for centering the text */
     place-items: center;
-    /* This creates the pie chart effect */
     background: conic-gradient(var(--primary-color) 0deg, #e5e5e5 0deg);
-    transition: background 0.2s;
+    transition: background 0.2s linear;
 }
 
+/* This creates the inner white circle */
 .progress-pie-chart::before {
     content: "";
     position: absolute;
     height: 130px;
     width: 130px;
-    background: #fff;
+    background: var(--container-bg);
     border-radius: 50%;
 }
 
 #progress-percentage {
-    position: relative; /* Ensure text is on top */
+    position: relative; /* Ensures the text is on top */
     font-size: 24px;
     font-weight: bold;
     color: var(--primary-color);
