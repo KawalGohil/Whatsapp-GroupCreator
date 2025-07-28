@@ -22,7 +22,7 @@ async function createGroup(sock, username, groupName, participants, adminJid = n
     }
     // --- END OF FIX ---
 
-    const randomDelayValue = getRandomDelay(10000, 20000); // Shortened for testing
+    const randomDelayValue = getRandomDelay(180000, 300000); // Shortened for testing
     logger.info(`Waiting for ${Math.round(randomDelayValue / 1000)}s before creating group "${groupName}"...`);
     await delay(randomDelayValue);
 
