@@ -1,9 +1,6 @@
 const { Server } = require('socket.io');
 const logger = require('../utils/logger');
 const { getClient } = require('./whatsappService');
-const fs = require('fs');
-const path = require('path');
-const config = require('../../config');
 
 global.userSockets = {};
 
@@ -38,15 +35,18 @@ function initializeSocket(server, sessionMiddleware) {
         global.userSockets[username] = socket.id;
         logger.info(`User '${username}' connected with socket ID: ${socket.id}`);
 
-        // Check the status of this specific user's client
-        const userClient = getClient(username);
-        if (userClient && userClient.ws.readyState === 1) {
-            logger.info(`Client for ${username} is already ready.`);
-            socket.emit('status', 'Client is ready!');
-        } else {
-            logger.warn(`Client for ${username} is not connected. Waiting for QR or connection...`);
-            socket.emit('status', 'Initializing your session, please wait...');
-        }
+        // --- THIS IS THE FIX ---
+        // Check for the client's status after a short delay to allow the state to be retrieved.
+        setTimeout(() => {
+            const userClient = getClient(username);
+            if (userClient && userClient.user) {
+                logger.info(`Client for ${username} is already connected and ready.`);
+                socket.emit('status', 'Client is ready!');
+            } else {
+                logger.warn(`Client for ${username} is not connected. Waiting for QR or connection...`);
+                socket.emit('status', 'Initializing your session, please wait...');
+            }
+        }, 1000); // 1-second delay for stability
 
         socket.on('disconnect', (reason) => {
             logger.info(`User '${username}' disconnected. Reason: ${reason}`);

@@ -1,3 +1,4 @@
+// src/services/whatsappService.js
 const { default: makeWASocket, useMultiFileAuthState, DisconnectReason, Browsers } = require('@whiskeysockets/baileys');
 const { Boom } = require('@hapi/boom');
 const path = require('path');
@@ -7,6 +8,9 @@ const logger = require('../utils/logger');
 const taskQueue = require('./taskQueue');
 const { createGroup } = require('./groupCreationService');
 const pino = require('pino');
+// --- THIS IS THE FIX ---
+// Added the missing import for the state manager functions
+const { readState } = require('../utils/stateManager');
 
 const activeClients = {};
 const processingUsers = new Set();
@@ -24,7 +28,7 @@ async function startBaileysClient(username) {
     
     const sock = makeWASocket({
         auth: state,
-        printQRInTerminal: true,
+        printQRInTerminal: false, // This is now the default, warning can be ignored
         browser: Browsers.macOS('Desktop'),
         logger: pino({ level: 'silent' })
     });
@@ -47,16 +51,11 @@ async function startBaileysClient(username) {
             if (shouldReconnect) {
                 setTimeout(() => startBaileysClient(username), 5000);
             } else {
-                // --- THIS IS THE FIX ---
-                // If the reason for closing is a logout, automatically delete the session folder.
-                logger.error(`${username} was logged out. Clearing session data to force a new QR scan on next login.`);
+                logger.error(`${username} was logged out. Clearing session data.`);
                 if (fs.existsSync(sessionPath)) {
                     fs.rm(sessionPath, { recursive: true, force: true }, (err) => {
-                        if (err) {
-                            logger.error(`Failed to delete session folder for ${username}:`, err);
-                        } else {
-                            logger.info(`Successfully deleted session folder for ${username}.`);
-                        }
+                        if (err) logger.error(`Failed to delete session folder for ${username}:`, err);
+                        else logger.info(`Successfully deleted session folder for ${username}.`);
                     });
                 }
             }
@@ -71,8 +70,6 @@ async function startBaileysClient(username) {
 
     sock.ev.on('creds.update', saveCreds);
 }
-
-// ... (The rest of the file remains unchanged)
 
 function getClient(username) {
     return activeClients[username];
@@ -106,15 +103,38 @@ async function processQueueForUser(username) {
             if (taskIndex === -1) break;
 
             const [task] = taskQueue.queue.splice(taskIndex, 1);
+            const userSocketId = global.userSockets?.[task.username];
+
+            const state = readState();
+            if (state.createdGroups[task.username]?.[task.groupName]) {
+                logger.info(`Group "${task.groupName}" already created. Skipping.`);
+                if (userSocketId) {
+                    global.io.to(userSocketId).emit('upload_progress', {
+                        current: task.index, total: task.total, currentGroup: `${task.groupName} (Skipped)`
+                    });
+                }
+                
+                // Update batch progress for skipped task
+                const tracker = batchTrackers[task.batchId];
+                if (tracker) {
+                    tracker.processed++;
+                    if (tracker.processed === tracker.total) {
+                         if (userSocketId) {
+                            global.io.to(userSocketId).emit('batch_complete', {
+                                successCount: tracker.successCount,
+                                failedCount: tracker.failedCount,
+                                total: tracker.total,
+                            });
+                        }
+                        delete batchTrackers[task.batchId];
+                    }
+                }
+                continue;
+            }
             
-            // --- THIS IS THE FIX for UI SYNC ---
-            // Initialize a tracker for the batch if it's the first task
             if (!batchTrackers[task.batchId]) {
                 batchTrackers[task.batchId] = {
-                    total: task.total,
-                    processed: 0,
-                    successCount: 0,
-                    failedCount: 0,
+                    total: task.total, processed: 0, successCount: 0, failedCount: 0,
                 };
             }
 
@@ -126,20 +146,17 @@ async function processQueueForUser(username) {
                 logger.error(`Task failed for group "${task.groupName}": ${error.message}`);
             }
 
-            // Update batch progress
             const tracker = batchTrackers[task.batchId];
             tracker.processed++;
             if (success) tracker.successCount++;
             else tracker.failedCount++;
             
-            const userSocketId = global.userSockets?.[task.username];
             if (userSocketId) {
                 global.io.to(userSocketId).emit('upload_progress', {
                     current: tracker.processed, total: tracker.total, currentGroup: task.groupName
                 });
             }
 
-            // If all tasks in the batch are processed, send the final confirmation
             if (tracker.processed === tracker.total) {
                 if (userSocketId) {
                     global.io.to(userSocketId).emit('batch_complete', {
@@ -148,7 +165,7 @@ async function processQueueForUser(username) {
                         total: tracker.total,
                     });
                 }
-                delete batchTrackers[task.batchId]; // Clean up tracker
+                delete batchTrackers[task.batchId];
             }
         }
     } finally {

@@ -158,7 +158,7 @@ window.addEventListener('DOMContentLoaded', () => {
 });
 
     socket.on('batch_complete', (data) => {
-        let message = `✅<br><b>Processing complete!</b><br>${data.successCount} of ${data.total} groups processed successfully.`;
+        let message = `<br><b>Processing complete!</b><br>${data.successCount} of ${data.total} groups processed successfully.`;
         if (data.failedCount > 0) {
             message += `<br><span style="color: var(--error-color);">${data.failedCount} groups failed.</span>`;
         }
@@ -224,7 +224,7 @@ window.addEventListener('DOMContentLoaded', () => {
     });
 
     // --- Find this event listener ---
-    groupForm.addEventListener('submit', async (e) => {
+     groupForm.addEventListener('submit', async (e) => {
         e.preventDefault();
         const mode = groupForm.querySelector('input[name="input-mode"]:checked').value;
         const submitButton = groupForm.querySelector('button[type="submit"]');
@@ -232,6 +232,10 @@ window.addEventListener('DOMContentLoaded', () => {
         submitButton.textContent = 'Processing...';
 
         if (mode === 'csv') {
+            // --- THIS IS THE FIX ---
+            progressState = {}; // Reset the timer state on new submission
+            // --- END OF FIX ---
+            
             uploadStatusSection.classList.remove('hidden');
             uploadStatusText.textContent = 'Starting processing...';
             // Reset pie chart visuals
