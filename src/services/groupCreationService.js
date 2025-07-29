@@ -33,9 +33,19 @@ async function createGroup(sock, username, groupName, participants, adminJid = n
 
 async function createGroupWithBaileys(sock, username, groupName, participants, adminJid) {
     const numbersToValidate = participants.map(p => p.split('@')[0]);
+   logger.info(`[User: ${username}] Validating ${numbersToValidate.length} numbers with WhatsApp for group "${groupName}"...`);
     const onWhatsApp = await sock.onWhatsApp(...numbersToValidate);
+    logger.info(`[User: ${username}] WhatsApp validation response: ${JSON.stringify(onWhatsApp)}`);
 
-    const confirmedParticipants = onWhatsApp.filter(result => result.exists).map(result => result.jid);
+    const confirmedParticipants = [];
+    onWhatsApp.forEach(result => {
+        if (result.exists) {
+            confirmedParticipants.push(result.jid);
+        } else {
+            // This log will now clearly show which numbers are being rejected by WhatsApp.
+            logger.warn(`[User: ${username}] WhatsApp reports that number ${result.jid} is not a valid user. Skipping.`);
+        }
+    });
 
     if (confirmedParticipants.length < 2) {
         throw new Error(`Not enough valid WhatsApp users found to form a group (found ${confirmedParticipants.length}, need at least 2).`);

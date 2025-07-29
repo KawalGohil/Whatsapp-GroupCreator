@@ -20,38 +20,44 @@ const sanitizePhoneNumber = (num) => {
     return null;
 };
 
-const readCsvPromise = (filePath) => {
+const processAndValidateCsv = (filePath) => {
     return new Promise((resolve, reject) => {
         const rows = [];
-        const mapHeaders = ({ header }) => header.toLowerCase().replace(/[\s-]+/g, '_');
-        fs.createReadStream(filePath)
-            .pipe(csv({ mapHeaders }))
-            .on('data', (data) => rows.push(data))
-            .on('end', () => {
-                fs.unlinkSync(filePath);
-                resolve(rows);
-            })
-            .on('error', (err) => reject(err));
+        const requiredHeaders = ['contact', 'booking_id', 'property_name', 'check_in', 'admin_number'];
+        const stream = fs.createReadStream(filePath)
+            .pipe(csv({
+                mapHeaders: ({ header }) => header.toLowerCase().replace(/[\s-]+/g, '_')
+            }));
+
+        stream.on('headers', (headers) => {
+            const missingHeaders = requiredHeaders.filter(h => !headers.includes(h));
+            if (missingHeaders.length > 0) {
+                stream.destroy();
+                return reject(new Error(`Invalid CSV format. Missing columns: ${missingHeaders.join(', ')}`));
+            }
+        });
+
+        stream.on('data', (data) => rows.push(data));
+        stream.on('end', () => resolve(rows));
+        stream.on('error', (err) => reject(err));
     });
 };
 
 exports.uploadContacts = async (req, res) => {
     const username = req.session.user.username;
-    logger.info(`[User: ${username}] Received CSV upload request.`);
+    logger.info(`[User: ${username}] Received HTTP request to upload file: ${req.file?.originalname}`);
     if (!req.file) {
-        logger.warn(`[User: ${username}] CSV upload failed: No file provided.`);
         return res.status(400).json({ message: 'No file uploaded.' });
     }
 
-    try {
-        logger.info(`[User: ${username}] Validating CSV headers for file: ${req.file.originalname}`);
-        await validateCsvHeaders(req.file.path);
-        logger.info(`[User: ${username}] CSV headers are valid.`);
+    const filePath = req.file.path;
 
-        const rows = await readCsvPromise(req.file.path);
+    try {
+        const rows = await processAndValidateCsv(filePath);
+        fs.unlinkSync(filePath); // Clean up the file after successful processing
+
         const batchId = uuidv4();
         
-        logger.info(`[User: ${username}] Responding to client with batchId: ${batchId} for ${rows.length} rows.`);
         res.status(202).json({
             message: 'File format is valid. Queuing groups for creation.',
             batchId: batchId,
@@ -59,12 +65,11 @@ exports.uploadContacts = async (req, res) => {
         });
         
         let queuedCount = 0;
-        logger.info(`[User: ${username}] [Batch: ${batchId}] Starting to process ${rows.length} rows.`);
         for (const [index, row] of rows.entries()) {
-            // ... (group name and participant logic is unchanged)
+            const groupName = `${row.booking_id} - ${row.property_name} - ${row.check_in}`;
+            const participants = [...new Set([row.admin_number, row.sem_number, row.contact].filter(Boolean).map(sanitizePhoneNumber).filter(Boolean))];
             
             if (participants.length < 2) {
-                logger.warn(`[User: ${username}] [Batch: ${batchId}] Skipping group "${groupName}": requires at least 2 valid members, but found ${participants.length}.`);
                 writeInviteLog(username, groupName, '', 'Failed', `Skipped: Not enough valid members found (${participants.length}).`);
                 continue;
             }
@@ -77,25 +82,21 @@ exports.uploadContacts = async (req, res) => {
                 total: rows.length,
             });
         }
-        logger.info(`[User: ${username}] [Batch: ${batchId}] Finished processing rows. Queued tasks: ${queuedCount}/${rows.length}.`);
-        // --- THIS IS THE FIX ---
-        // If the file had rows but nothing was queued, it means all rows were invalid.
-        // We must manually inform the UI that this "batch" is complete.
+        
         if (rows.length > 0 && queuedCount === 0) {
-            logger.info(`Batch ${batchId} for user ${username} had no valid rows to queue. Notifying UI.`);
             const userSocketId = global.userSockets?.[username];
             if (userSocketId) {
                 global.io.to(userSocketId).emit('batch_complete', {
-                    successCount: 0,
-                    failedCount: rows.length, // All rows failed
-                    total: rows.length,
-                    batchId: batchId
+                    successCount: 0, failedCount: rows.length, total: rows.length, batchId: batchId
                 });
             }
         }
-        
     } catch (error) {
-        logger.error('Error processing CSV file:', error);
+        logger.error(`[User: ${username}] CSV processing failed: ${error.message}`);
+        res.status(400).json({ message: error.message });
+        if (fs.existsSync(filePath)) {
+            fs.unlinkSync(filePath); // Ensure cleanup on failure
+        }
     }
 };
 
