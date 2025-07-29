@@ -26,7 +26,7 @@ window.addEventListener('DOMContentLoaded', () => {
     const toggleRegisterLink = document.getElementById('toggle-register');
     const uploadStatusSection = document.getElementById('upload-status-section');
     const uploadStatusText = document.getElementById('upload-status-text');
-    let progressState = {}; // To store timing information
+    let progressState = {};
     let currentBatchId = null;
 
     // --- UI State Functions ---
@@ -63,12 +63,9 @@ window.addEventListener('DOMContentLoaded', () => {
         registerForm.reset();
         loginStatus.textContent = '';
         registerStatus.textContent = '';
-
-        // --- Add these lines to fully reset the UI state ---
         qrcodeDiv.innerHTML = '';
         statusDiv.classList.remove('hidden');
         displayStatus('Connecting to WhatsApp...', 'info');
-
         document.getElementById('log-file-select').innerHTML = '<option value="" disabled selected>Select a log file</option>';
     }
 
@@ -77,9 +74,6 @@ window.addEventListener('DOMContentLoaded', () => {
         statusDiv.className = `status ${type}`;
     }
 
-    /**
-     * FIX #1: This function is now self-contained and robust.
-     */
     function toggleAuthView() {
         loginView.classList.toggle('hidden');
         registerView.classList.toggle('hidden');
@@ -90,16 +84,12 @@ window.addEventListener('DOMContentLoaded', () => {
     socket.on('disconnect', (reason) => console.log('Disconnected:', reason));
     socket.on('connect_error', (error) => console.error('Connection error:', error));
 
-     socket.on('qr', (qr) => {
-        statusDiv.classList.remove('hidden'); // Ensure status text is visible for QR
+    socket.on('qr', (qr) => {
         displayStatus('Scan QR code with WhatsApp', 'info');
-        qrcodeDiv.innerHTML = ''; // Clear previous content (like the 'Ready' message)
+        qrcodeDiv.innerHTML = '';
         const canvas = document.createElement('canvas');
-
-        // --- CHANGE THE WIDTH HERE from 256 to 200 ---
-        QRCode.toCanvas(canvas, qr, { width: 200 }, (err) => { // This should match the CSS width for #qrcode
+        QRCode.toCanvas(canvas, qr, { width: 200 }, (err) => {
             if (err) {
-                console.error('QR Code Error:', err);
                 displayStatus('Error generating QR code.', 'error');
                 return;
             }
@@ -107,46 +97,29 @@ window.addEventListener('DOMContentLoaded', () => {
         });
     });
 
-    // --- REPLACE THIS BLOCK ---
     socket.on('status', (message) => {
         if (message.toLowerCase().includes('ready')) {
-            // Hide the text status element and show the visual "Ready" state in the main box.
             statusDiv.classList.add('hidden');
-            qrcodeDiv.innerHTML = `
-                <div class="client-ready-container">
-                    <div class="client-ready-icon">✓</div>
-                    <div class="client-ready-title">Client Ready</div>
-                    <div class="client-ready-subtitle">You can now create groups.</div>
-                </div>`;
+            qrcodeDiv.innerHTML = `<div class="client-ready-container"><div class="client-ready-icon">✓</div><div class="client-ready-title">Client Ready</div><div class="client-ready-subtitle">You can now create groups.</div></div>`;
         } else {
-            // For other statuses (like connecting), show the text status and ensure it's visible.
             statusDiv.classList.remove('hidden');
             displayStatus(message, 'info');
         }
     });
 
-    socket.on('log_updated', () => {
-        console.log('Log update received from server, refreshing log list.');
-        fetchAndRenderLogs();
-    });
+    socket.on('log_updated', () => fetchAndRenderLogs());
 
-     socket.on('upload_progress', (data) => {
-        // Only update the UI if the progress event is for the current batch
+    socket.on('upload_progress', (data) => {
         if (data.batchId !== currentBatchId) return;
 
         if (!progressState.startTime) {
             progressState.startTime = Date.now();
-            progressState.total = data.total;
         }
-
         const percentage = Math.round((data.current / data.total) * 100);
         const degrees = percentage * 3.6;
         
-        const $ppc = document.querySelector('.progress-pie-chart');
-        const $span = document.getElementById('progress-percentage');
-        
-        $ppc.style.background = `conic-gradient(var(--primary-color) ${degrees}deg, #e5e5e5 ${degrees}deg)`;
-        $span.textContent = `${percentage}%`;
+        document.querySelector('.progress-pie-chart').style.background = `conic-gradient(var(--primary-color) ${degrees}deg, #e5e5e5 ${degrees}deg)`;
+        document.getElementById('progress-percentage').textContent = `${percentage}%`;
         
         const elapsedMs = Date.now() - progressState.startTime;
         const avgTimePerGroup = elapsedMs / data.current;
@@ -159,9 +132,7 @@ window.addEventListener('DOMContentLoaded', () => {
         uploadStatusText.innerHTML = `Processing group ${data.current} of ${data.total}: <b>${data.currentGroup}</b><br>Time remaining: ${timeString}`;
     });
 
-    // Listen for the final completion of the batch
     socket.on('batch_complete', (data) => {
-        // Only show completion if it's for the current batch
         if (data.batchId !== currentBatchId) return;
 
         let message = `✅<br><b>Processing complete!</b><br>${data.successCount} of ${data.total} groups processed.`;
@@ -170,38 +141,31 @@ window.addEventListener('DOMContentLoaded', () => {
         }
         uploadStatusText.innerHTML = message;
         progressState = {};
-        currentBatchId = null; // Clear the batch ID
-        setTimeout(() => {
-            uploadStatusSection.classList.add('hidden');
-        }, 8000);
+        currentBatchId = null;
+        setTimeout(() => uploadStatusSection.classList.add('hidden'), 8000);
     });
+
     // --- Form Event Listeners ---
     loginForm.addEventListener('submit', async (e) => {
-    e.preventDefault();
-
-    // --- FIX: Read values BEFORE resetting the form ---
-    const username = loginForm.querySelector('#login-username').value;
-    const password = loginForm.querySelector('#login-password').value;
-
-    showLogin(); // Now it's safe to reset the UI for the new login attempt
-
-    try {
-        const response = await fetch('/api/auth/login', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ username, password }),
-        });
-        const data = await response.json();
-        if (response.ok) {
-            showApp(username);
-            showToast('Login successful!', 'success');
-        } else {
-            loginStatus.textContent = data.message || 'Login failed.';
+        e.preventDefault();
+        const username = loginForm.querySelector('#login-username').value;
+        const password = loginForm.querySelector('#login-password').value;
+        try {
+            const response = await fetch('/api/auth/login', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ username, password }),
+            });
+            const data = await response.json();
+            if (response.ok) {
+                showApp(username);
+            } else {
+                loginStatus.textContent = data.message || 'Login failed.';
+            }
+        } catch (error) {
+            loginStatus.textContent = 'Error connecting to server.';
         }
-    } catch (error) {
-        loginStatus.textContent = 'Error connecting to server.';
-    }
-});
+    });
 
     registerForm.addEventListener('submit', async (e) => {
         e.preventDefault();
@@ -229,25 +193,38 @@ window.addEventListener('DOMContentLoaded', () => {
         showLogin();
     });
 
-    // --- Find this event listener ---
+    // --- THIS IS THE FIX ---
+    // A single, robust event handler for the form.
     groupForm.addEventListener('submit', async (e) => {
         e.preventDefault();
         const mode = groupForm.querySelector('input[name="input-mode"]:checked').value;
         const submitButton = groupForm.querySelector('button[type="submit"]');
+        const formElements = groupForm.querySelectorAll('input, textarea, button');
 
         if (mode === 'csv' && contactsInput.files.length === 0) {
             showToast('Please select a CSV file to upload.', 'error');
             return;
         }
 
-        submitButton.disabled = true;
+        // Disable all form elements at the start
+        formElements.forEach(el => el.disabled = true);
         submitButton.textContent = 'Processing...';
 
         try {
             if (mode === 'manual') {
-                // ... (manual logic is unchanged)
+                const groupName = document.getElementById('groupName').value;
+                const numbers = document.getElementById('manualNumbers').value;
+                const desiredAdminNumber = document.getElementById('desiredAdminNumber').value;
+
+                const response = await fetch('/api/groups/create-manual', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ groupName, numbers, desiredAdminNumber }),
+                });
+                const result = await response.json();
+                showToast(result.message, response.ok ? 'success' : 'error');
             } else { // CSV mode
-                progressState = {}; // Reset timer
+                progressState = {};
                 uploadStatusSection.classList.remove('hidden');
                 uploadStatusText.textContent = 'Uploading and preparing...';
                 
@@ -261,9 +238,6 @@ window.addEventListener('DOMContentLoaded', () => {
                 
                 const result = await response.json();
                 if (response.ok) {
-                    // --- THIS IS THE FIX ---
-                    // The backend now gives us the batchId and total.
-                    // We store it and prepare the UI for progress updates.
                     currentBatchId = result.batchId;
                     uploadStatusText.textContent = `Queued ${result.total} groups for creation...`;
                     document.getElementById('progress-percentage').textContent = '0%';
@@ -275,26 +249,26 @@ window.addEventListener('DOMContentLoaded', () => {
         } catch (error) {
             showToast('An unexpected error occurred.', 'error');
         } finally {
-            submitButton.disabled = false;
+            // Re-enable all form elements
+            formElements.forEach(el => el.disabled = false);
             submitButton.textContent = 'Create Group';
-            contactsInput.value = ''; // Clear the file input
+            
+            // Clear the correct fields based on the mode
+            if (mode === 'manual') {
+                document.getElementById('groupName').value = '';
+                document.getElementById('manualNumbers').value = '';
+                document.getElementById('desiredAdminNumber').value = '';
+            } else {
+                contactsInput.value = '';
+            }
         }
     });
 
-    // Event listeners for toggling views
-    toggleRegisterLink.addEventListener('click', toggleAuthView);
-    toggleLoginLink.addEventListener('click', toggleAuthView);
-
-    /**
-     * FIX #2: This listener now correctly manages the `required` attribute.
-     */
     document.querySelectorAll('input[name="input-mode"]').forEach(radio => {
         radio.addEventListener('change', function() {
             const isManual = this.value === 'manual';
             manualInputSection.classList.toggle('hidden', !isManual);
             fileInputSection.classList.toggle('hidden', isManual);
-            
-            // Update required attributes to prevent form errors
             groupNameInput.required = isManual;
             contactsInput.required = !isManual;
         });
@@ -306,25 +280,19 @@ window.addEventListener('DOMContentLoaded', () => {
             const response = await fetch('/api/groups/list-logs');
             if (!response.ok) throw new Error('Failed to fetch logs');
             const logs = await response.json();
-            logFileSelect.innerHTML = '';
-
-            if (logs.length === 0) {
-                logFileSelect.innerHTML = '<option value="" disabled selected>No logs available yet</option>';
-            } else {
-                logs.forEach(log => {
-                    const option = document.createElement('option');
-                    option.value = log.filename;
-                    option.textContent = log.display;
-                    logFileSelect.appendChild(option);
-                });
-            }
+            logFileSelect.innerHTML = '<option value="" disabled selected>Select a log file</option>';
+            logs.forEach(log => {
+                const option = document.createElement('option');
+                option.value = log.filename;
+                option.textContent = log.display;
+                logFileSelect.appendChild(option);
+            });
         } catch (error) {
             console.error('Error fetching logs:', error);
             logFileSelect.innerHTML = '<option value="" disabled selected>Error loading logs</option>';
         }
     }
 
-   // --- Log File Download Listener ---
     document.getElementById('download-invite-log-btn').addEventListener('click', () => {
         const selectedLogFile = document.getElementById('log-file-select').value;
         if (!selectedLogFile) {
@@ -334,14 +302,16 @@ window.addEventListener('DOMContentLoaded', () => {
         window.location.href = `/api/groups/download-log/${selectedLogFile}`;
     });
 
-    // --- Initial Load ---
     (async function checkInitialAuth() {
-        const response = await fetch('/api/auth/check-auth');
-        if (response.ok) {
-            const { user } = await response.json();
-            showApp(user.username);
-            fetchAndRenderLogs(); // Fetch logs on initial load
-        } else {
+        try {
+            const response = await fetch('/api/auth/check-auth');
+            if (response.ok) {
+                const { user } = await response.json();
+                showApp(user.username);
+            } else {
+                showLogin();
+            }
+        } catch (error) {
             showLogin();
         }
     })();
