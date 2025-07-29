@@ -8,8 +8,6 @@ const logger = require('../utils/logger');
 const taskQueue = require('./taskQueue');
 const { createGroup } = require('./groupCreationService');
 const pino = require('pino');
-// --- THIS IS THE FIX ---
-// Added the missing import for the state manager functions
 const { readState } = require('../utils/stateManager');
 
 const activeClients = {};
@@ -40,6 +38,7 @@ async function startBaileysClient(username) {
         const userSocketId = global.userSockets?.[username];
 
         if (qr && userSocketId) {
+            logger.info(`[User: ${username}] QR code generated. Emitting 'qr' event to socket ID ${userSocketId}.`);
             global.io.to(userSocketId).emit('qr', qr);
         }
         

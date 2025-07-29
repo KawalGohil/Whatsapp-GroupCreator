@@ -206,7 +206,15 @@ window.addEventListener('DOMContentLoaded', () => {
             return;
         }
 
-        // Disable all form elements at the start
+        // --- Stricter validation for manual mode ---
+        if (mode === 'manual') {
+            const numbers = document.getElementById('manualNumbers').value.split(/[,\n]/).filter(Boolean);
+            if (numbers.length < 1) {
+                showToast('Please provide at least one participant phone number.', 'error');
+                return;
+            }
+        }
+
         formElements.forEach(el => el.disabled = true);
         submitButton.textContent = 'Processing...';
 
@@ -243,17 +251,15 @@ window.addEventListener('DOMContentLoaded', () => {
                     document.getElementById('progress-percentage').textContent = '0%';
                     document.querySelector('.progress-pie-chart').style.background = `conic-gradient(var(--primary-color) 0deg, #e5e5e5 0deg)`;
                 } else {
-                    showToast(result.message, 'error');
+                    showToast(result.message || 'An error occurred during upload.', 'error');
                 }
             }
         } catch (error) {
             showToast('An unexpected error occurred.', 'error');
         } finally {
-            // Re-enable all form elements
             formElements.forEach(el => el.disabled = false);
             submitButton.textContent = 'Create Group';
             
-            // Clear the correct fields based on the mode
             if (mode === 'manual') {
                 document.getElementById('groupName').value = '';
                 document.getElementById('manualNumbers').value = '';

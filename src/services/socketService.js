@@ -24,10 +24,12 @@ function initializeSocket(server, sessionMiddleware) {
             return socket.disconnect(true);
         }
 
-        const username = session.user.username;
+         const username = session.user.username;
+        logger.info(`User '${username}' attempting to connect with socket ID: ${socket.id}`);
         const oldSocketId = global.userSockets[username];
+
         if (oldSocketId && oldSocketId !== socket.id) {
-            logger.info(`User ${username} connected with a new socket. Disconnecting old one.`);
+            logger.info(`User '${username}' already has an active socket (${oldSocketId}). Disconnecting old one.`);
             
             // --- THIS IS THE FIX ---
             // Get the actual socket instance from the server's list of connected sockets

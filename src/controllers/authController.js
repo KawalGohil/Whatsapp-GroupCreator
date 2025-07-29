@@ -7,6 +7,7 @@ const logger = require('../utils/logger');
 // User Registration
 exports.register = (req, res) => {
     const { username, password } = req.body;
+    logger.info(`Registration attempt for username: ${username}`);
     if (!username || !password || password.length < 6) {
         return res.status(400).json({ message: 'Username and a password of at least 6 characters are required.' });
     }
@@ -32,7 +33,7 @@ exports.register = (req, res) => {
 // User Login
 exports.login = (req, res) => {
     const { username, password } = req.body;
-
+    logger.info(`Login attempt for username: ${username}`);
     userModel.findUserByUsername(username, (err, user) => {
         if (err) {
             logger.error(`Database error during login for user ${username}:`, err);
@@ -63,7 +64,7 @@ exports.login = (req, res) => {
 // The Baileys client is no longer shut down on logout, allowing it to complete its queue.
 exports.logout = (req, res) => {
     const username = req.session.user?.username;
-
+    logger.info(`Logout attempt for username: ${username || 'N/A'}`);
     req.session.destroy((err) => {
         if (err) {
             logger.error('Error destroying session:', err);
