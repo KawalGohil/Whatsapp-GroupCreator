@@ -27,13 +27,14 @@ window.addEventListener('DOMContentLoaded', () => {
     const uploadStatusSection = document.getElementById('upload-status-section');
     const uploadStatusText = document.getElementById('upload-status-text');
     
+    // --- State Variables ---
     let progressState = {};
     let currentBatchId = null;
-    
-    // --- ✅ FIX #1: Cache for early progress updates ---
+    // FIX #1: A cache to hold progress updates that arrive before the UI is ready.
     const progressCache = {};
 
-    // --- UI State Functions (no changes) ---
+
+    // --- UI State and Helper Functions ---
     function showApp(username) {
         authContainer.classList.add('hidden');
         appContainer.classList.remove('hidden');
@@ -77,10 +78,27 @@ window.addEventListener('DOMContentLoaded', () => {
         statusDiv.textContent = message;
         statusDiv.className = `status ${type}`;
     }
+    
+    // FIX #2: A reusable function to update the progress bar UI.
+    function updateProgressUI(data) {
+        if (!progressState.startTime) {
+            progressState.startTime = Date.now();
+        }
+        const percentage = Math.round((data.current / data.total) * 100);
+        const degrees = percentage * 3.6;
+        
+        document.querySelector('.progress-pie-chart').style.background = `conic-gradient(var(--primary-color) ${degrees}deg, #e5e5e5 ${degrees}deg)`;
+        document.getElementById('progress-percentage').textContent = `${percentage}%`;
+        
+        const elapsedMs = Date.now() - progressState.startTime;
+        const avgTimePerGroup = elapsedMs / data.current;
+        const remainingGroups = data.total - data.current;
+        const remainingMs = Math.round(remainingGroups * avgTimePerGroup);
+        const remainingMinutes = Math.floor(remainingMs / 60000);
+        const remainingSeconds = Math.round((remainingMs % 60000) / 1000);
+        const timeString = remainingMinutes > 0 ? `~${remainingMinutes}m ${remainingSeconds}s` : `~${remainingSeconds}s`;
 
-    function toggleAuthView() {
-        loginView.classList.toggle('hidden');
-        registerView.classList.toggle('hidden');
+        uploadStatusText.innerHTML = `Processing group ${data.current} of ${data.total}: <b>${data.currentGroup}</b><br>Time remaining: ${timeString}`;
     }
 
     // --- Socket Event Listeners ---
@@ -113,44 +131,19 @@ window.addEventListener('DOMContentLoaded', () => {
 
     socket.on('log_updated', () => fetchAndRenderLogs());
 
-    // --- ✅ FIX #2: Smarter progress update function ---
-    function updateProgressUI(data) {
-        if (!progressState.startTime) {
-            progressState.startTime = Date.now();
-        }
-        const percentage = Math.round((data.current / data.total) * 100);
-        const degrees = percentage * 3.6;
-        
-        const pieChart = document.querySelector('.progress-pie-chart');
-        const percentageText = document.getElementById('progress-percentage');
-        
-        if (pieChart) pieChart.style.background = `conic-gradient(var(--primary-color) ${degrees}deg, #e5e5e5 ${degrees}deg)`;
-        if (percentageText) percentageText.textContent = `${percentage}%`;
-        
-        const elapsedMs = Date.now() - progressState.startTime;
-        const avgTimePerGroup = elapsedMs / data.current;
-        const remainingGroups = data.total - data.current;
-        const remainingMs = Math.round(remainingGroups * avgTimePerGroup);
-        const remainingMinutes = Math.floor(remainingMs / 60000);
-        const remainingSeconds = Math.round((remainingMs % 60000) / 1000);
-        const timeString = remainingMinutes > 0 ? `~${remainingMinutes}m ${remainingSeconds}s` : `~${remainingSeconds}s`;
-
-        uploadStatusText.innerHTML = `Processing group ${data.current} of ${data.total}: <b>${data.currentGroup}</b><br>Time remaining: ${timeString}`;
-    }
-
+    // This new listener handles the race condition.
     socket.on('batch_progress', (data) => {
-        // If the current batchId isn't set yet, cache the progress.
         if (!currentBatchId || data.batchId !== currentBatchId) {
-            progressCache[data.batchId] = data;
+            progressCache[data.batchId] = data; // Cache the update if UI isn't ready
             return;
         }
-        updateProgressUI(data);
+        updateProgressUI(data); // Update UI if ready
     });
 
     socket.on('batch_complete', (data) => {
         if (data.batchId !== currentBatchId) return;
 
-        let message = `✅<br><b>Processing complete!</b><br>${data.successCount} of ${data.total} groups processed.`;
+        let message = `<br><b>Processing complete!</b><br>${data.successCount} of ${data.total} groups processed.`;
         if (data.failedCount > 0) {
             message += `<br><span style="color: var(--error-color);">${data.failedCount} groups failed or were skipped.</span>`;
         }
@@ -160,7 +153,54 @@ window.addEventListener('DOMContentLoaded', () => {
         setTimeout(() => uploadStatusSection.classList.add('hidden'), 8000);
     });
 
-    // --- Form Event Listeners (with final fix) ---
+    // --- Form Event Listeners ---
+    loginForm.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const username = loginForm.querySelector('#login-username').value;
+        const password = loginForm.querySelector('#login-password').value;
+        try {
+            const response = await fetch('/api/auth/login', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ username, password }),
+            });
+            const data = await response.json();
+            if (response.ok) {
+                showApp(username);
+            } else {
+                loginStatus.textContent = data.message || 'Login failed.';
+            }
+        } catch (error) {
+            loginStatus.textContent = 'Error connecting to server.';
+        }
+    });
+
+    registerForm.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const username = registerForm.querySelector('#register-username').value;
+        const password = registerForm.querySelector('#register-password').value;
+        try {
+            const response = await fetch('/api/auth/register', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ username, password }),
+            });
+            const data = await response.json();
+            if (response.ok) {
+                showApp(username);
+            } else {
+                registerStatus.textContent = data.message || 'Registration failed.';
+            }
+        } catch (error) {
+            registerStatus.textContent = 'Error connecting to server.';
+        }
+    });
+    
+    logoutButton.addEventListener('click', async () => {
+        await fetch('/api/auth/logout', { method: 'POST' });
+        showLogin();
+    });
+
     groupForm.addEventListener('submit', async (e) => {
         e.preventDefault();
         const mode = groupForm.querySelector('input[name="input-mode"]:checked').value;
@@ -216,18 +256,20 @@ window.addEventListener('DOMContentLoaded', () => {
                     document.getElementById('progress-percentage').textContent = '0%';
                     document.querySelector('.progress-pie-chart').style.background = `conic-gradient(var(--primary-color) 0deg, #e5e5e5 0deg)`;
 
-                    // --- ✅ FIX #3: Check the cache for early updates ---
+                    // FIX #3: After the UI is ready, check the cache for any early updates.
                     if (progressCache[currentBatchId]) {
                         updateProgressUI(progressCache[currentBatchId]);
-                        delete progressCache[currentBatchId]; // Clean up
+                        delete progressCache[currentBatchId]; // Clean up the cache
                     }
 
                 } else {
                     showToast(result.message || 'An error occurred during upload.', 'error');
+                    uploadStatusSection.classList.add('hidden'); // Hide status on failure
                 }
             }
         } catch (error) {
             showToast('An unexpected error occurred.', 'error');
+            uploadStatusSection.classList.add('hidden'); // Hide status on failure
         } finally {
             formElements.forEach(el => el.disabled = false);
             submitButton.textContent = 'Create Group';
@@ -242,7 +284,7 @@ window.addEventListener('DOMContentLoaded', () => {
         }
     });
 
-    // --- Other Listeners (no changes) ---
+    // --- Other Listeners and Initializers ---
     document.querySelectorAll('input[name="input-mode"]').forEach(radio => {
         radio.addEventListener('change', function() {
             const isManual = this.value === 'manual';
@@ -257,7 +299,10 @@ window.addEventListener('DOMContentLoaded', () => {
         const logFileSelect = document.getElementById('log-file-select');
         try {
             const response = await fetch('/api/groups/list-logs');
-            if (!response.ok) throw new Error('Failed to fetch logs');
+            if (!response.ok) {
+                 if (response.status !== 404) throw new Error('Failed to fetch logs');
+                 return; // Do nothing if logs just don't exist yet
+            }
             const logs = await response.json();
             logFileSelect.innerHTML = '<option value="" disabled selected>Select a log file</option>';
             logs.forEach(log => {

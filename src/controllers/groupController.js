@@ -7,7 +7,7 @@ const taskQueue = require('../services/taskQueue');
 const logger = require('../utils/logger');
 const { createGroup } = require('../services/groupCreationService');
 const { writeInviteLog } = require('../utils/inviteLogger');
-const config =require('../../config');
+const config = require('../../config');
 
 const sanitizePhoneNumber = (num) => {
     if (!num) return null;
@@ -52,11 +52,7 @@ exports.uploadContacts = async (req, res) => {
     const filePath = req.file.path;
 
     try {
-        // --- ✨ THE FIX IS HERE ✨ ---
-        // Changed 'const' to 'let' to allow the variable to be reassigned.
         let rows = await processAndValidateCsv(filePath);
-        // --- End of Fix ---
-        
         fs.unlinkSync(filePath); // Clean up the file after successful processing
         
         // This filter for empty rows will now work correctly.
@@ -108,11 +104,11 @@ exports.uploadContacts = async (req, res) => {
 };
 
 exports.createManualGroup = async (req, res) => {
-    const { groupName, numbers, desiredAdminNumber } = req.body;
     // Check if user exists on the session before destructuring
     if (!req.session.user) {
         return res.status(401).json({ message: 'You are not logged in.' });
     }
+    const { groupName, numbers, desiredAdminNumber } = req.body;
     const { username, jid: userJid } = req.session.user; // Get username and JID from session
     const sock = getClient(username);
 
@@ -143,8 +139,24 @@ exports.createManualGroup = async (req, res) => {
         }
 
         const adminJid = sanitizePhoneNumber(desiredAdminNumber);
-        await createGroup(sock, username, groupName, participants, adminJid);
-        res.status(200).json({ message: `Group "${groupName}" creation initiated.` });
+        
+        // --- ✅ THE FIX IS HERE ✅ ---
+        // 1. Capture the result status from the createGroup service.
+        const resultStatus = await createGroup(sock, username, groupName, participants, adminJid);
+
+        // 2. Send a specific response based on the result.
+        switch (resultStatus) {
+            case 'success':
+                return res.status(200).json({ message: `Group "${groupName}" was created successfully.` });
+            case 'skipped':
+                return res.status(200).json({ message: `Skipped: Group "${groupName}" already exists.` });
+            case 'failed':
+                return res.status(500).json({ message: `Failed to create group "${groupName}". Check logs for details.` });
+            default:
+                // Fallback for any unexpected case
+                return res.status(202).json({ message: `Group "${groupName}" creation process initiated.` });
+        }
+        // --- End of Fix ---
 
     } catch (error) {
         logger.error(`Manual group creation failed for ${username}:`, error);
@@ -159,9 +171,13 @@ exports.listLogs = (req, res) => {
     }
     const username = req.session.user.username;
 
+    // This check prevents errors if the directory doesn't exist yet.
+    if (!fs.existsSync(logDir)) {
+        return res.status(200).json([]);
+    }
+
     fs.readdir(logDir, (err, files) => {
         if (err) {
-            if (err.code === 'ENOENT') return res.status(200).json([]);
             logger.error(`Could not list log files for user ${username}:`, err);
             return res.status(500).json({ message: 'Error accessing log files.' });
         }
