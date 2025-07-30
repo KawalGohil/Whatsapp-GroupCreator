@@ -158,7 +158,7 @@ async function processQueueForUser(username) {
                 tracker.processed++;
                 tracker.failedCount++;
                 if (userSocketId) {
-                    global.io.to(userSocketId).emit('upload_progress', {
+                    global.io.to(userSocketId).emit('batch_progress', {
                         current: tracker.processed, total: tracker.total,
                         currentGroup: `${task.groupName} (Skipped)`,
                         batchId: task.batchId
@@ -179,7 +179,7 @@ async function processQueueForUser(username) {
                 else tracker.failedCount++;
 
                 if (userSocketId) {
-                    global.io.to(userSocketId).emit('upload_progress', {
+                    global.io.to(userSocketId).emit('batch_progress', {
                         current: tracker.processed, total: tracker.total,
                         currentGroup: task.groupName, batchId: task.batchId
                     });
