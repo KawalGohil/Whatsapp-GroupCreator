@@ -5,6 +5,10 @@ window.addEventListener('DOMContentLoaded', () => {
         withCredentials: true,
     });
 
+    socket.onAny((eventName, ...args) => {
+    console.log(`[Socket.IO Debug] Received event: '${eventName}' with data:`, args);
+});
+
     // --- DOM Elements ---
     const authContainer = document.getElementById('auth-container');
     const appContainer = document.getElementById('app-container');
@@ -109,7 +113,8 @@ window.addEventListener('DOMContentLoaded', () => {
 
     socket.on('log_updated', () => fetchAndRenderLogs());
 
-    socket.on('upload_progress', (data) => {
+    socket.on('batch_progress', (data) => {
+         console.log(`[BROWSER-DEBUG] 'batch_progress' listener triggered. Comparing server batchId '${data.batchId}' with frontend currentBatchId '${currentBatchId}'.`);
         if (data.batchId !== currentBatchId) return;
 
         if (!progressState.startTime) {
