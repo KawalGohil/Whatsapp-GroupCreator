@@ -7,7 +7,7 @@ const taskQueue = require('../services/taskQueue');
 const logger = require('../utils/logger');
 const { createGroup } = require('../services/groupCreationService');
 const { writeInviteLog } = require('../utils/inviteLogger');
-const config = require('../../config');
+const config =require('../../config');
 
 const sanitizePhoneNumber = (num) => {
     if (!num) return null;
@@ -18,7 +18,6 @@ const sanitizePhoneNumber = (num) => {
     return null;
 };
 
-// --- No changes to this function ---
 const processAndValidateCsv = (filePath) => {
     return new Promise((resolve, reject) => {
         const rows = [];
@@ -42,7 +41,6 @@ const processAndValidateCsv = (filePath) => {
     });
 };
 
-// --- No changes to this function ---
 exports.uploadContacts = async (req, res) => {
     const username = req.session.user.username;
     logger.info(`[User: ${username}] Received HTTP request to upload file: ${req.file?.originalname}`);
@@ -53,10 +51,16 @@ exports.uploadContacts = async (req, res) => {
     const filePath = req.file.path;
 
     try {
-        const rows = await processAndValidateCsv(filePath);
+        // --- ✨ THE FIX IS HERE ✨ ---
+        // Changed 'const' to 'let' to allow the variable to be reassigned.
+        let rows = await processAndValidateCsv(filePath);
+        // --- End of Fix ---
+        
         fs.unlinkSync(filePath); // Clean up the file after successful processing
         
+        // This filter for empty rows will now work correctly.
         rows = rows.filter(row => Object.values(row).some(val => val && val.trim() !== ''));
+        
         const batchId = uuidv4();
         
         res.status(202).json({
@@ -71,7 +75,8 @@ exports.uploadContacts = async (req, res) => {
             const participants = [...new Set([row.admin_number, row.sem_number, row.contact].filter(Boolean).map(sanitizePhoneNumber).filter(Boolean))];
             
             if (participants.length < 2) {
-                writeInviteLog(username, groupName, '', 'Failed', `Skipped: Not enough valid members found (${participants.length}).`);
+                // Pass batchId to the log function
+                writeInviteLog(username, groupName, '', 'Failed', `Skipped: Not enough valid members found (${participants.length}).`, batchId);
                 continue;
             }
             
@@ -94,23 +99,24 @@ exports.uploadContacts = async (req, res) => {
         }
     } catch (error) {
         logger.error(`[User: ${username}] CSV processing failed: ${error.message}`);
-        res.status(400).json({ message: error.message });
+        res.status(400).json({ message: 'The CSV file could not be processed. Please check the file format and content.' });
         if (fs.existsSync(filePath)) {
             fs.unlinkSync(filePath); // Ensure cleanup on failure
         }
     }
 };
 
-
-// --- ✨ MODIFIED FUNCTION ✨ ---
 exports.createManualGroup = async (req, res) => {
     const { groupName, numbers, desiredAdminNumber } = req.body;
+    // Check if user exists on the session before destructuring
+    if (!req.session.user) {
+        return res.status(401).json({ message: 'You are not logged in.' });
+    }
     const { username, jid: userJid } = req.session.user; // Get username and JID from session
     const sock = getClient(username);
 
     logger.info(`[User: ${username}] Received manual group creation request for group: "${groupName}"`);
 
-    // 1. Validate initial state
     if (!sock) {
         return res.status(400).json({ message: 'WhatsApp client not ready. Please wait or re-login.' });
     }
@@ -123,25 +129,18 @@ exports.createManualGroup = async (req, res) => {
     }
 
     try {
-        // 2. Build participant list
-        // Sanitize numbers from input and automatically add the group creator
         let participants = numbers.split(/[,\n]/).map(sanitizePhoneNumber).filter(Boolean);
         participants.push(userJid);
         
-        // Remove any duplicates (e.g., if creator adds their own number)
         participants = [...new Set(participants)];
 
-        // 3. Validate participant count
-        // A group needs at least 2 people: the creator and one other member.
         if (participants.length < 2) {
             const reason = 'A group needs at least one valid member besides the creator.';
             logger.warn(`[User: ${username}] Manual group "${groupName}" skipped. ${reason}`);
-            // Log the skipped attempt
             writeInviteLog(username, groupName, '', 'Failed', `Skipped: ${reason}`);
             return res.status(400).json({ message: reason });
         }
 
-        // 4. Initiate group creation
         const adminJid = sanitizePhoneNumber(desiredAdminNumber);
         await createGroup(sock, username, groupName, participants, adminJid);
         res.status(200).json({ message: `Group "${groupName}" creation initiated.` });
@@ -152,15 +151,18 @@ exports.createManualGroup = async (req, res) => {
     }
 };
 
-// --- No changes to these functions ---
 exports.listLogs = (req, res) => {
     const logDir = path.join(config.paths.data, 'invite-logs');
+    if (!req.session.user) {
+        return res.status(401).json({ message: 'You are not logged in.' });
+    }
     const username = req.session.user.username;
 
     fs.readdir(logDir, (err, files) => {
         if (err) {
             if (err.code === 'ENOENT') return res.status(200).json([]);
-            return res.status(500).json({ message: 'Could not list log files.' });
+            logger.error(`Could not list log files for user ${username}:`, err);
+            return res.status(500).json({ message: 'Error accessing log files.' });
         }
 
         const userLogs = files
@@ -178,6 +180,9 @@ exports.listLogs = (req, res) => {
 exports.downloadLog = (req, res) => {
     const logDir = path.join(config.paths.data, 'invite-logs');
     const { filename } = req.params;
+    if (!req.session.user) {
+        return res.status(401).json({ message: 'You are not logged in.' });
+    }
     const username = req.session.user.username;
 
     if (!filename.startsWith(`group_invite_log_${username}`)) {
