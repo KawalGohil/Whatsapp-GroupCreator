@@ -55,7 +55,8 @@ exports.uploadContacts = async (req, res) => {
     try {
         const rows = await processAndValidateCsv(filePath);
         fs.unlinkSync(filePath); // Clean up the file after successful processing
-
+        
+        rows = rows.filter(row => Object.values(row).some(val => val && val.trim() !== ''));
         const batchId = uuidv4();
         
         res.status(202).json({
