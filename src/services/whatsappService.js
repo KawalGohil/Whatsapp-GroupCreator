@@ -9,6 +9,7 @@ const taskQueue = require('./taskQueue');
 const { createGroup } = require('./groupCreationService');
 const pino = require('pino');
 const { readState } = require('../utils/stateManager');
+const { writeInviteLog } = require('../utils/inviteLogger');
 
 const activeClients = {};
 const processingUsers = new Set();
@@ -108,7 +109,10 @@ async function processQueueForUser(username) {
     if (processingUsers.has(username)) return;
 
     const client = getClient(username);
-    if (!client || !client.user) return;
+    if (!client || !client.user) {
+        logger.warn(`[User: ${username}] Client not ready. Queue processing paused.`);
+        return;
+    }
 
     processingUsers.add(username);
     logger.info(`Starting queue processing for user: ${username}`);
@@ -116,7 +120,7 @@ async function processQueueForUser(username) {
     try {
         while (true) {
             const taskIndex = taskQueue.queue.findIndex(t => t.username === username);
-            if (taskIndex === -1) break;
+            if (taskIndex === -1) break; // No more tasks for this user
 
             const [task] = taskQueue.queue.splice(taskIndex, 1);
             const userSocketId = global.userSockets?.[task.username];
@@ -130,25 +134,36 @@ async function processQueueForUser(username) {
             const tracker = batchTrackers[task.batchId];
 
             const state = readState();
+            // Check if the group already exists
             if (state.createdGroups[task.username]?.[task.groupName]) {
+                const reason = 'Group already exists';
                 logger.info(`Group "${task.groupName}" already created. Skipping.`);
+
+                // --- ✨ THE FIX (Part 1) ✨ ---
+                // Log the skipped group to your CSV file
+                writeInviteLog(task.username, task.groupName, '', 'Skipped', reason, task.batchId);
+                // --- End of Fix ---
+
                 tracker.processed++;
-                tracker.failedCount++; // Count skips as "failed" for reporting purposes
+                tracker.failedCount++; // Count skips as "failed" for reporting
 
                 if (userSocketId) {
                     global.io.to(userSocketId).emit('upload_progress', {
                         current: tracker.processed, total: tracker.total,
                         currentGroup: `${task.groupName} (Skipped)`,
-                        batchId: task.batchId // --- ADDED BATCH ID ---
+                        batchId: task.batchId
                     });
                 }
             } else {
+                // This block handles creating NEW groups
                 let success = false;
                 try {
-                    await createGroup(client, task.username, task.groupName, task.participants, task.adminJid);
+                    // Pass batchId to createGroup so it can be used in deeper logs if needed
+                    await createGroup(client, task.username, task.groupName, task.participants, task.adminJid, task.batchId);
                     success = true;
                 } catch (error) {
                     logger.error(`Task failed for group "${task.groupName}": ${error.message}`);
+                    // The error is already logged inside createGroup, so no need to log it here again.
                 }
                 
                 tracker.processed++;
@@ -159,23 +174,26 @@ async function processQueueForUser(username) {
                     global.io.to(userSocketId).emit('upload_progress', {
                         current: tracker.processed, total: tracker.total,
                         currentGroup: task.groupName,
-                        batchId: task.batchId // --- ADDED BATCH ID ---
+                        batchId: task.batchId
                     });
                 }
             }
 
-            // If all tasks in the batch are processed, send the final confirmation
+            // --- ✨ THE FIX (Part 2) ✨ ---
+            // Check if the batch is complete and notify the UI
             if (tracker.processed === tracker.total) {
                 if (userSocketId) {
                     global.io.to(userSocketId).emit('batch_complete', {
                         successCount: tracker.successCount,
                         failedCount: tracker.failedCount,
                         total: tracker.total,
-                        batchId: task.batchId // --- ADDED BATCH ID ---
+                        batchId: task.batchId
                     });
                 }
+                logger.info(`Batch ${task.batchId} completed for ${task.username}. Success: ${tracker.successCount}, Failed/Skipped: ${tracker.failedCount}`);
                 delete batchTrackers[task.batchId]; // Clean up tracker
             }
+            // --- End of Fix ---
         }
     } finally {
         processingUsers.delete(username);

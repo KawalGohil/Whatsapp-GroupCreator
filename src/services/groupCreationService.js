@@ -12,27 +12,36 @@ function emitLogUpdated(username) {
     }
 }
 
-async function createGroup(sock, username, groupName, participants, adminJid = null) {
+async function createGroup(sock, username, groupName, participants, adminJid = null, batchId = null) {
     const state = readState();
     if (state.createdGroups[username]?.[groupName]) {
+        const reason = 'Group already exists';
         logger.info(`Group "${groupName}" already created by ${username}. Skipping.`);
-         writeInviteLog(username, groupName, '', 'Skipped', 'Group already exists');
-        return;
+        
+        // Log the skipped group to the CSV, passing the batchId
+        writeInviteLog(username, groupName, '', 'Skipped', reason, batchId);
+        
+        // Return 'skipped' status to the queue processor
+        return 'skipped'; 
     }
 
-    const randomDelayValue = getRandomDelay(10000, 20000); // 10-20 seconds
+    const randomDelayValue = getRandomDelay(10000, 20000);
     logger.info(`Waiting for ${Math.round(randomDelayValue / 1000)}s before creating group "${groupName}"...`);
     await delay(randomDelayValue);
 
     try {
-        await createGroupWithBaileys(sock, username, groupName, participants, adminJid);
+        await createGroupWithBaileys(sock, username, groupName, participants, adminJid, batchId);
+        return 'success'; // Return 'success' on completion
     } catch (baileysError) {
         logger.error(`Baileys failed for group "${groupName}": ${baileysError.message}.`);
-        writeInviteLog(username, groupName, '', 'Failed', baileysError.message);
+        // The batchId is now passed to the logger here as well
+        writeInviteLog(username, groupName, '', 'Failed', baileysError.message, batchId);
+        return 'failed'; // Return 'failed' status
     }
 }
 
-async function createGroupWithBaileys(sock, username, groupName, participants, adminJid) {
+
+async function createGroupWithBaileys(sock, username, groupName, participants, adminJid, batchId) {
     const numbersToValidate = participants.map(p => p.split('@')[0]);
    logger.info(`[User: ${username}] Validating ${numbersToValidate.length} numbers with WhatsApp for group "${groupName}"...`);
     const onWhatsApp = await sock.onWhatsApp(...numbersToValidate);
@@ -64,17 +73,17 @@ async function createGroupWithBaileys(sock, username, groupName, participants, a
             try {
                 await sock.groupParticipantsUpdate(group.id, [adminJid], "promote");
                 logger.info(`Successfully promoted ${adminJid} to admin.`);
-                writeInviteLog(username, groupName, inviteLink, 'Success');
+                writeInviteLog(username, groupName, inviteLink, 'Success', batchId);
             } catch (e) {
                 logger.error(`Failed to promote admin ${adminJid}: ${e.message}`);
-                writeInviteLog(username, groupName, inviteLink, 'Success (Admin Promotion Failed)', e.message);
+                writeInviteLog(username, groupName, inviteLink, 'Success (Admin Promotion Failed)', e.message, batchId);
             }
         } else {
             logger.warn(`Admin JID ${adminJid} was not a valid participant. Cannot promote.`);
-            writeInviteLog(username, groupName, inviteLink, 'Success (Admin Not Found)');
+            writeInviteLog(username, groupName, inviteLink, 'Success (Admin Not Found)', batchId);
         }
     } else {
-        writeInviteLog(username, groupName, inviteLink, 'Success');
+        writeInviteLog(username, groupName, inviteLink, 'Success', batchId);
     }
     
     emitLogUpdated(username);
