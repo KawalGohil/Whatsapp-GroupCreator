@@ -92,7 +92,9 @@ async function startBaileysClient(username, session) {
  */
 taskQueue.on('new_task', (username) => {
     logger.info(`[User: ${username}] New task detected, attempting to process queue.`);
-    processQueueForUser(username);
+     setTimeout(() => {
+        processQueueForUser(username);
+    }, 200);
 });
 
 /**
