@@ -7,19 +7,18 @@ const taskQueue = require('../services/taskQueue');
 const logger = require('../utils/logger');
 const { createGroup } = require('../services/groupCreationService');
 const { writeInviteLog } = require('../utils/inviteLogger');
-// --- THIS IS THE FIX ---
-// Added the missing import for the config file
 const config = require('../../config');
 
 const sanitizePhoneNumber = (num) => {
     if (!num) return null;
     const cleaned = String(num).replace(/\D/g, '');
     if (cleaned.length >= 11) return `${cleaned}@s.whatsapp.net`;
-    if (cleaned.length === 10) return `91${cleaned}@s.whatsapp.net`;
+    if (cleaned.length === 10) return `91${cleaned}@s.whatsapp.net`; // Assuming Indian numbers if 10 digits
     logger.warn(`Skipping invalid or incomplete phone number: ${num}`);
     return null;
 };
 
+// --- No changes to this function ---
 const processAndValidateCsv = (filePath) => {
     return new Promise((resolve, reject) => {
         const rows = [];
@@ -43,6 +42,7 @@ const processAndValidateCsv = (filePath) => {
     });
 };
 
+// --- No changes to this function ---
 exports.uploadContacts = async (req, res) => {
     const username = req.session.user.username;
     logger.info(`[User: ${username}] Received HTTP request to upload file: ${req.file?.originalname}`);
@@ -101,27 +101,57 @@ exports.uploadContacts = async (req, res) => {
 };
 
 
-// --- Manual Group Creation and Log functions are unchanged ---
+// --- ✨ MODIFIED FUNCTION ✨ ---
 exports.createManualGroup = async (req, res) => {
     const { groupName, numbers, desiredAdminNumber } = req.body;
-    const username = req.session.user.username;
+    const { username, jid: userJid } = req.session.user; // Get username and JID from session
     const sock = getClient(username);
-    logger.info(`[User: ${username}] Received manual group creation request for group: "${req.body.groupName}"`);
-    if (!sock) return res.status(400).json({ message: 'WhatsApp client not ready. Please wait or re-login.' });
-    if (!groupName || !numbers) return res.status(400).json({ message: 'Group name and numbers are required.' });
+
+    logger.info(`[User: ${username}] Received manual group creation request for group: "${groupName}"`);
+
+    // 1. Validate initial state
+    if (!sock) {
+        return res.status(400).json({ message: 'WhatsApp client not ready. Please wait or re-login.' });
+    }
+    if (!userJid) {
+        logger.error(`[User: ${username}] User JID not found in session. Cannot add creator to group.`);
+        return res.status(500).json({ message: 'Could not identify group creator. Please re-login.' });
+    }
+    if (!groupName || !numbers) {
+        return res.status(400).json({ message: 'Group name and at least one member\'s number are required.' });
+    }
 
     try {
-        const participants = numbers.split(/[,\n]/).map(sanitizePhoneNumber).filter(Boolean);
-        const adminJid = sanitizePhoneNumber(desiredAdminNumber);
+        // 2. Build participant list
+        // Sanitize numbers from input and automatically add the group creator
+        let participants = numbers.split(/[,\n]/).map(sanitizePhoneNumber).filter(Boolean);
+        participants.push(userJid);
+        
+        // Remove any duplicates (e.g., if creator adds their own number)
+        participants = [...new Set(participants)];
 
+        // 3. Validate participant count
+        // A group needs at least 2 people: the creator and one other member.
+        if (participants.length < 2) {
+            const reason = 'A group needs at least one valid member besides the creator.';
+            logger.warn(`[User: ${username}] Manual group "${groupName}" skipped. ${reason}`);
+            // Log the skipped attempt
+            writeInviteLog(username, groupName, '', 'Failed', `Skipped: ${reason}`);
+            return res.status(400).json({ message: reason });
+        }
+
+        // 4. Initiate group creation
+        const adminJid = sanitizePhoneNumber(desiredAdminNumber);
         await createGroup(sock, username, groupName, participants, adminJid);
         res.status(200).json({ message: `Group "${groupName}" creation initiated.` });
+
     } catch (error) {
         logger.error(`Manual group creation failed for ${username}:`, error);
         res.status(500).json({ message: error.message });
     }
 };
 
+// --- No changes to these functions ---
 exports.listLogs = (req, res) => {
     const logDir = path.join(config.paths.data, 'invite-logs');
     const username = req.session.user.username;

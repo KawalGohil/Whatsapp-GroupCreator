@@ -16,6 +16,7 @@ async function createGroup(sock, username, groupName, participants, adminJid = n
     const state = readState();
     if (state.createdGroups[username]?.[groupName]) {
         logger.info(`Group "${groupName}" already created by ${username}. Skipping.`);
+         writeInviteLog(username, groupName, '', 'Skipped', 'Group already exists');
         return;
     }
 
