@@ -24,7 +24,8 @@ const processAndValidateCsv = (filePath) => {
         const requiredHeaders = ['contact', 'booking_id', 'property_name', 'check_in', 'admin_number'];
         const stream = fs.createReadStream(filePath)
             .pipe(csv({
-                mapHeaders: ({ header }) => header.toLowerCase().replace(/[\s-]+/g, '_')
+                mapHeaders: ({ header }) => header.toLowerCase().replace(/[\s-]+/g, '_'),
+                bom: true
             }));
 
         stream.on('headers', (headers) => {

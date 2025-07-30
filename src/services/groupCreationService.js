@@ -73,21 +73,25 @@ async function createGroupWithBaileys(sock, username, groupName, participants, a
             try {
                 await sock.groupParticipantsUpdate(group.id, [adminJid], "promote");
                 logger.info(`Successfully promoted ${adminJid} to admin.`);
-                writeInviteLog(username, groupName, inviteLink, 'Success', batchId);
+                // --- ✅ FIX: Added missing '' argument for details ---
+                writeInviteLog(username, groupName, inviteLink, 'Success', '', batchId);
             } catch (e) {
                 logger.error(`Failed to promote admin ${adminJid}: ${e.message}`);
                 writeInviteLog(username, groupName, inviteLink, 'Success (Admin Promotion Failed)', e.message, batchId);
             }
         } else {
             logger.warn(`Admin JID ${adminJid} was not a valid participant. Cannot promote.`);
-            writeInviteLog(username, groupName, inviteLink, 'Success (Admin Not Found)', batchId);
+            // --- ✅ FIX: Added missing '' argument for details ---
+            writeInviteLog(username, groupName, inviteLink, 'Success (Admin Not Found)', '', batchId);
         }
     } else {
-        writeInviteLog(username, groupName, inviteLink, 'Success', batchId);
+        // --- ✅ FIX: Added missing '' argument for details ---
+        writeInviteLog(username, groupName, inviteLink, 'Success', '', batchId);
     }
     
     emitLogUpdated(username);
     
+    // This part of the code will now be reached without crashing
     const state = readState();
     if (!state.createdGroups[username]) {
         state.createdGroups[username] = {};
