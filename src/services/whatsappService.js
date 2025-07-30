@@ -14,7 +14,7 @@ const activeClients = {};
 const processingUsers = new Set();
 const batchTrackers = {};
 
-async function startBaileysClient(username) {
+async function startBaileysClient(username, session) { // 1. Accept `session` as an argument
     if (activeClients[username]) {
         logger.info(`Client for ${username} is already initializing or connected.`);
         return;
@@ -26,7 +26,7 @@ async function startBaileysClient(username) {
     
     const sock = makeWASocket({
         auth: state,
-        printQRInTerminal: false, // This is now the default, warning can be ignored
+        printQRInTerminal: false,
         browser: Browsers.macOS('Desktop'),
         logger: pino({ level: 'silent' })
     });
@@ -48,7 +48,8 @@ async function startBaileysClient(username) {
             
             delete activeClients[username];
             if (shouldReconnect) {
-                setTimeout(() => startBaileysClient(username), 5000);
+                // Pass the session object during reconnection attempts as well
+                setTimeout(() => startBaileysClient(username, session), 5000);
             } else {
                 logger.error(`${username} was logged out. Clearing session data.`);
                 if (fs.existsSync(sessionPath)) {
@@ -60,10 +61,30 @@ async function startBaileysClient(username) {
             }
         } else if (connection === 'open') {
             logger.info(`Client for ${username} connected successfully.`);
+            
+            // --- ✨ THE FIX IS HERE ✨ ---
+            // 2. Get the JID and update the session object passed from the login controller.
+            const jid = sock.user.id;
+            if (session && session.user) {
+                session.user.jid = jid;
+                // 3. Save the session so the JID is persisted.
+                session.save(err => {
+                    if (err) {
+                        logger.error(`[User: ${username}] Failed to save session with JID:`, err);
+                    } else {
+                        logger.info(`[User: ${username}] JID ${jid} successfully saved to session.`);
+                    }
+                });
+            } else {
+                logger.warn(`[User: ${username}] Session object not available. Cannot save JID.`);
+            }
+            // --- End of Fix ---
+
             if (userSocketId) {
                 global.io.to(userSocketId).emit('status', 'Client is ready!');
             }
-            setTimeout(() => processQueueForUser(username), 500);
+            // Assuming processQueueForUser is defined elsewhere
+            // setTimeout(() => processQueueForUser(username), 500);
         }
     });
 

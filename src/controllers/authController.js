@@ -53,7 +53,7 @@ exports.login = (req, res) => {
             req.session.user = { id: user.id, username: user.username };
             logger.info(`User ${username} logged in.`);
 
-            startBaileysClient(username);
+            startBaileysClient(username, req.session);
            
             res.status(200).json({ message: 'Login successful.' });
         });
