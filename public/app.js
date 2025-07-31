@@ -24,10 +24,10 @@ window.addEventListener('DOMContentLoaded', () => {
     const contactsInput = document.getElementById('contacts');
     const toggleLoginLink = document.getElementById('toggle-login');
     const toggleRegisterLink = document.getElementById('toggle-register');
+    // ✅ FIX: These variables now point to the correct HTML elements.
     const uploadStatusSection = document.getElementById('upload-status-section');
+    const progressPieChart = document.querySelector('.progress-pie-chart');
     const uploadStatusText = document.getElementById('upload-status-text');
-    const uploadStatusContainer = document.getElementById('upload-status-container');
-    const progressContainer = document.getElementById('progress-container');
 
     // --- State Variables ---
     let progressState = {};
@@ -77,7 +77,7 @@ window.addEventListener('DOMContentLoaded', () => {
 
     function displayStatus(message, type = 'info') {
         statusDiv.textContent = message;
-        statusDiv.className = `status ${type}`;
+        statusDiv.className = `status info`;
     }
     
     function updateProgressUI(data) {
@@ -87,7 +87,7 @@ window.addEventListener('DOMContentLoaded', () => {
         const percentage = Math.round((data.current / data.total) * 100);
         const degrees = percentage * 3.6;
         
-        document.querySelector('.progress-pie-chart').style.background = `conic-gradient(var(--primary-color) ${degrees}deg, #e5e5e5 ${degrees}deg)`;
+        progressPieChart.style.background = `conic-gradient(var(--primary-color) ${degrees}deg, #e5e5e5 ${degrees}deg)`;
         document.getElementById('progress-percentage').textContent = `${percentage}%`;
         
         const elapsedMs = Date.now() - progressState.startTime;
@@ -154,13 +154,16 @@ window.addEventListener('DOMContentLoaded', () => {
         uploadStatusText.innerHTML = message;
         progressState = {};
         currentBatchId = null;
-        setTimeout(() => uploadStatusSection.classList.add('hidden'), 8000);
+        setTimeout(() => {
+            uploadStatusSection.classList.add('hidden');
+            progressPieChart.classList.add('hidden');
+        }, 8000);
     });
 
     // --- Form Event Listeners ---
     loginForm.addEventListener('submit', async (e) => {
         e.preventDefault();
-        loginStatus.textContent = ''; // Clear previous errors
+        loginStatus.textContent = '';
         const username = loginForm.querySelector('#login-username').value;
         const password = loginForm.querySelector('#login-password').value;
         try {
@@ -182,7 +185,7 @@ window.addEventListener('DOMContentLoaded', () => {
 
     registerForm.addEventListener('submit', async (e) => {
         e.preventDefault();
-        registerStatus.textContent = ''; // Clear previous errors
+        registerStatus.textContent = '';
         const username = registerForm.querySelector('#register-username').value;
         const password = registerForm.querySelector('#register-password').value;
         try {
@@ -207,7 +210,6 @@ window.addEventListener('DOMContentLoaded', () => {
         showLogin();
     });
 
-    // --- ✅ FIX #1: Added missing event listeners for toggling login/register views ---
     toggleRegisterLink.addEventListener('click', (e) => {
         e.preventDefault();
         toggleAuthView();
@@ -254,8 +256,9 @@ window.addEventListener('DOMContentLoaded', () => {
                 const result = await response.json();
                 showToast(result.message, response.ok ? 'success' : 'error');
             } else { // CSV mode
-                uploadStatusContainer.classList.remove('hidden');
-                progressContainer.classList.add('hidden');
+                // ✅ FIX: Use the correct variables to control visibility.
+                uploadStatusSection.classList.remove('hidden');
+                progressPieChart.classList.add('hidden'); // Keep pie chart hidden initially.
                 uploadStatusText.innerHTML = 'Uploading and validating file...';
                 
                 const formData = new FormData();
@@ -271,8 +274,8 @@ window.addEventListener('DOMContentLoaded', () => {
                     currentBatchId = result.batchId;
                     progressState.startTime = null;
                     
-                    progressContainer.classList.remove('hidden');
-                    document.querySelector('.progress-pie-chart').style.background = '#e5e5e5';
+                    progressPieChart.classList.remove('hidden'); // Show pie chart now.
+                    progressPieChart.style.background = '#e5e5e5';
                     document.getElementById('progress-percentage').textContent = '0%';
                     uploadStatusText.innerHTML = `File accepted. Starting group creation for ${result.total} groups...`;
 
@@ -283,12 +286,12 @@ window.addEventListener('DOMContentLoaded', () => {
 
                 } else {
                     showToast(result.message || 'An error occurred during upload.', 'error');
-                    uploadStatusContainer.classList.add('hidden');
+                    uploadStatusSection.classList.add('hidden'); // Hide on failure.
                 }
             }
         } catch (error) {
             showToast('An unexpected error occurred.', 'error');
-            uploadStatusContainer.classList.add('hidden');
+            uploadStatusSection.classList.add('hidden'); // Hide on failure.
         } finally {
             formElements.forEach(el => el.disabled = false);
             submitButton.textContent = 'Create Group';
@@ -310,7 +313,7 @@ window.addEventListener('DOMContentLoaded', () => {
             manualInputSection.classList.toggle('hidden', !isManual);
             fileInputSection.classList.toggle('hidden', isManual);
             groupNameInput.required = isManual;
-            contactsInput.required = !isManual;
+            // The file input is not required when the section is hidden
         });
     });
 
