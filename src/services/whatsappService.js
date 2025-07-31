@@ -11,22 +11,38 @@ const pino = require('pino');
 const { readState } = require('../utils/stateManager');
 const { writeInviteLog } = require('../utils/inviteLogger');
 
-// These are module-level variables to track state across the application
 const activeClients = {};
 const processingUsers = new Set();
 const batchTrackers = {};
 
-/**
- * Initializes and starts the Baileys WhatsApp client for a user.
- * This is the main entry point for connecting to WhatsApp.
- */
 async function startBaileysClient(username, session) {
-    // Prevent starting a client if one is already running or initializing
+    // --- ✅ THE FIX IS HERE ---
+    // This block now correctly handles users who log in when a client is already active.
+    if (activeClients[username] && activeClients[username].user) {
+        logger.info(`Client for ${username} is already connected and ready.`);
+        
+        // This is the crucial step that was missing:
+        // Even if the client is ready, we must ensure the *current* session has the JID.
+        const jid = activeClients[username].user.id;
+        if (session && session.user && session.user.jid !== jid) {
+            session.user.jid = jid;
+            session.save(err => {
+                if (err) {
+                    logger.error(`[User: ${username}] Failed to update session with JID on re-login:`, err);
+                } else {
+                    logger.info(`[User: ${username}] Session updated with existing JID: ${jid}.`);
+                }
+            });
+        }
+        return; // Exit after ensuring the session is updated.
+    }
+
     if (activeClients[username]) {
-        logger.info(`[User: ${username}] Client is already running or initializing.`);
+        logger.info(`[User: ${username}] Client is already initializing. No action needed.`);
         return;
     }
 
+    // This part handles brand-new connections.
     logger.info(`Initializing Baileys client for user: ${username}`);
     const sessionPath = path.join(config.paths.session, username);
     const { state, saveCreds } = await useMultiFileAuthState(sessionPath);
@@ -34,10 +50,8 @@ async function startBaileysClient(username, session) {
     const sock = makeWASocket({ auth: state, browser: Browsers.macOS('Desktop'), logger: pino({ level: 'silent' }) });
     activeClients[username] = sock;
 
-    // Save credentials on update
     sock.ev.on('creds.update', saveCreds);
 
-    // Main connection logic handler
     sock.ev.on('connection.update', (update) => {
         const { connection, lastDisconnect, qr } = update;
         const userSocketId = global.userSockets?.[username];
@@ -51,7 +65,6 @@ async function startBaileysClient(username, session) {
             logger.error(`Connection for ${username} closed. Reconnecting: ${shouldReconnect}`);
             delete activeClients[username];
             if (shouldReconnect) {
-                // Pass the session object again on reconnection attempts
                 setTimeout(() => startBaileysClient(username, session), 5000);
             } else {
                 logger.error(`${username} was logged out. Clearing session data.`);
@@ -64,14 +77,12 @@ async function startBaileysClient(username, session) {
         } else if (connection === 'open') {
             logger.info(`Client for ${username} connected successfully.`);
             
-            // --- FIX #1: RELIABLY SAVE JID TO SESSION ---
-            // This happens as soon as the connection is open, fixing manual creation.
             const jid = sock.user.id;
             if (session && session.user) {
                 session.user.jid = jid;
                 session.save(err => {
                     if (err) logger.error(`[User: ${username}] Failed to save session with JID:`, err);
-                    else logger.info(`[User: ${username}] JID ${jid} successfully saved to session.`);
+                    else logger.info(`[User: ${username}] JID ${jid} successfully saved to new session.`);
                 });
             }
 
@@ -79,34 +90,22 @@ async function startBaileysClient(username, session) {
                 global.io.to(userSocketId).emit('status', 'Client is ready!');
             }
             
-            // --- FIX #2: TRIGGER QUEUE PROCESSING ---
-            // This is the key fix for the stuck UI. It ensures any tasks that were queued
-            // while the client was connecting are now processed immediately.
             processQueueForUser(username);
         }
     });
 }
 
-/**
- * Listens for new tasks and attempts to start the queue processor.
- */
 taskQueue.on('new_task', (username) => {
-    logger.info(`[User: ${username}] New task detected, attempting to process queue.`);
-     setTimeout(() => {
+    logger.info(`[User: ${username}] New task detected. Queue will start processing shortly.`);
+    setTimeout(() => {
         processQueueForUser(username);
     }, 200);
 });
 
-/**
- * Retrieves the active Baileys client for a given user.
- */
 function getClient(username) {
     return activeClients[username];
 }
 
-/**
- * Gracefully logs out and closes the Baileys client.
- */
 async function closeBaileysClient(username) {
     const sock = activeClients[username];
     if (sock) {
@@ -116,10 +115,6 @@ async function closeBaileysClient(username) {
     }
 }
 
-/**
- * Processes the task queue for a specific user.
- * This function now correctly handles all states, including skipped groups.
- */
 async function processQueueForUser(username) {
     if (processingUsers.has(username)) return;
 
@@ -149,19 +144,17 @@ async function processQueueForUser(username) {
             if (state.createdGroups[task.username]?.[task.groupName]) {
                 const reason = 'Group already exists';
                 logger.info(`Group "${task.groupName}" already created. Skipping.`);
+                
                 writeInviteLog(task.username, task.groupName, '', 'Skipped', reason, task.batchId);
                 
                 tracker.processed++;
                 tracker.failedCount++;
                 if (userSocketId) {
-                     const eventData = {
-        current: tracker.processed, total: tracker.total,
-        currentGroup: `${task.groupName} (Skipped)`, batchId: task.batchId
-    };
-    // --- ADD THIS LINE FOR DEBUGGING ---
-    logger.info(`[DEBUG] Emitting 'batch_progress' for skipped group: ${JSON.stringify(eventData)}`);
-    
-    global.io.to(userSocketId).emit('batch_progress', eventData);
+                    global.io.to(userSocketId).emit('batch_progress', {
+                        current: tracker.processed, total: tracker.total,
+                        currentGroup: `${task.groupName} (Skipped)`,
+                        batchId: task.batchId
+                    });
                 }
             } else {
                 let success = false;
@@ -177,14 +170,10 @@ async function processQueueForUser(username) {
                 else tracker.failedCount++;
 
                 if (userSocketId) {
-                    const eventData = {
-        current: tracker.processed, total: tracker.total,
-        currentGroup: task.groupName, batchId: task.batchId
-    };
-    // --- ADD THIS LINE FOR DEBUGGING ---
-    logger.info(`[DEBUG] Emitting 'batch_progress' for new group: ${JSON.stringify(eventData)}`);
-
-    global.io.to(userSocketId).emit('batch_progress', eventData);
+                    global.io.to(userSocketId).emit('batch_progress', {
+                        current: tracker.processed, total: tracker.total,
+                        currentGroup: task.groupName, batchId: task.batchId
+                    });
                 }
             }
 
