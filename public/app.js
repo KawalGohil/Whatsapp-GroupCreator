@@ -26,11 +26,12 @@ window.addEventListener('DOMContentLoaded', () => {
     const toggleRegisterLink = document.getElementById('toggle-register');
     const uploadStatusSection = document.getElementById('upload-status-section');
     const uploadStatusText = document.getElementById('upload-status-text');
-    
+    const uploadStatusContainer = document.getElementById('upload-status-container');
+    const progressContainer = document.getElementById('progress-container');
+
     // --- State Variables ---
     let progressState = {};
     let currentBatchId = null;
-    // FIX #1: A cache to hold progress updates that arrive before the UI is ready.
     const progressCache = {};
 
 
@@ -79,7 +80,6 @@ window.addEventListener('DOMContentLoaded', () => {
         statusDiv.className = `status ${type}`;
     }
     
-    // FIX #2: A reusable function to update the progress bar UI.
     function updateProgressUI(data) {
         if (!progressState.startTime) {
             progressState.startTime = Date.now();
@@ -99,6 +99,11 @@ window.addEventListener('DOMContentLoaded', () => {
         const timeString = remainingMinutes > 0 ? `~${remainingMinutes}m ${remainingSeconds}s` : `~${remainingSeconds}s`;
 
         uploadStatusText.innerHTML = `Processing group ${data.current} of ${data.total}: <b>${data.currentGroup}</b><br>Time remaining: ${timeString}`;
+    }
+
+    function toggleAuthView() {
+        loginView.classList.toggle('hidden');
+        registerView.classList.toggle('hidden');
     }
 
     // --- Socket Event Listeners ---
@@ -131,19 +136,18 @@ window.addEventListener('DOMContentLoaded', () => {
 
     socket.on('log_updated', () => fetchAndRenderLogs());
 
-    // This new listener handles the race condition.
     socket.on('batch_progress', (data) => {
         if (!currentBatchId || data.batchId !== currentBatchId) {
-            progressCache[data.batchId] = data; // Cache the update if UI isn't ready
+            progressCache[data.batchId] = data; 
             return;
         }
-        updateProgressUI(data); // Update UI if ready
+        updateProgressUI(data); 
     });
 
     socket.on('batch_complete', (data) => {
         if (data.batchId !== currentBatchId) return;
 
-        let message = `<br><b>Processing complete!</b><br>${data.successCount} of ${data.total} groups processed.`;
+        let message = `✅<br><b>Processing complete!</b><br>${data.successCount} of ${data.total} groups processed.`;
         if (data.failedCount > 0) {
             message += `<br><span style="color: var(--error-color);">${data.failedCount} groups failed or were skipped.</span>`;
         }
@@ -156,6 +160,7 @@ window.addEventListener('DOMContentLoaded', () => {
     // --- Form Event Listeners ---
     loginForm.addEventListener('submit', async (e) => {
         e.preventDefault();
+        loginStatus.textContent = ''; // Clear previous errors
         const username = loginForm.querySelector('#login-username').value;
         const password = loginForm.querySelector('#login-password').value;
         try {
@@ -177,6 +182,7 @@ window.addEventListener('DOMContentLoaded', () => {
 
     registerForm.addEventListener('submit', async (e) => {
         e.preventDefault();
+        registerStatus.textContent = ''; // Clear previous errors
         const username = registerForm.querySelector('#register-username').value;
         const password = registerForm.querySelector('#register-password').value;
         try {
@@ -199,6 +205,17 @@ window.addEventListener('DOMContentLoaded', () => {
     logoutButton.addEventListener('click', async () => {
         await fetch('/api/auth/logout', { method: 'POST' });
         showLogin();
+    });
+
+    // --- ✅ FIX #1: Added missing event listeners for toggling login/register views ---
+    toggleRegisterLink.addEventListener('click', (e) => {
+        e.preventDefault();
+        toggleAuthView();
+    });
+
+    toggleLoginLink.addEventListener('click', (e) => {
+        e.preventDefault();
+        toggleAuthView();
     });
 
     groupForm.addEventListener('submit', async (e) => {
@@ -237,9 +254,9 @@ window.addEventListener('DOMContentLoaded', () => {
                 const result = await response.json();
                 showToast(result.message, response.ok ? 'success' : 'error');
             } else { // CSV mode
-                progressState = {};
-                uploadStatusSection.classList.remove('hidden');
-                uploadStatusText.textContent = 'Uploading and preparing...';
+                uploadStatusContainer.classList.remove('hidden');
+                progressContainer.classList.add('hidden');
+                uploadStatusText.innerHTML = 'Uploading and validating file...';
                 
                 const formData = new FormData();
                 formData.append('contacts', contactsInput.files[0]);
@@ -252,24 +269,26 @@ window.addEventListener('DOMContentLoaded', () => {
                 const result = await response.json();
                 if (response.ok) {
                     currentBatchId = result.batchId;
-                    uploadStatusText.textContent = `Queued ${result.total} groups for creation...`;
+                    progressState.startTime = null;
+                    
+                    progressContainer.classList.remove('hidden');
+                    document.querySelector('.progress-pie-chart').style.background = '#e5e5e5';
                     document.getElementById('progress-percentage').textContent = '0%';
-                    document.querySelector('.progress-pie-chart').style.background = `conic-gradient(var(--primary-color) 0deg, #e5e5e5 0deg)`;
+                    uploadStatusText.innerHTML = `File accepted. Starting group creation for ${result.total} groups...`;
 
-                    // FIX #3: After the UI is ready, check the cache for any early updates.
                     if (progressCache[currentBatchId]) {
                         updateProgressUI(progressCache[currentBatchId]);
-                        delete progressCache[currentBatchId]; // Clean up the cache
+                        delete progressCache[currentBatchId];
                     }
 
                 } else {
                     showToast(result.message || 'An error occurred during upload.', 'error');
-                    uploadStatusSection.classList.add('hidden'); // Hide status on failure
+                    uploadStatusContainer.classList.add('hidden');
                 }
             }
         } catch (error) {
             showToast('An unexpected error occurred.', 'error');
-            uploadStatusSection.classList.add('hidden'); // Hide status on failure
+            uploadStatusContainer.classList.add('hidden');
         } finally {
             formElements.forEach(el => el.disabled = false);
             submitButton.textContent = 'Create Group';
@@ -301,7 +320,7 @@ window.addEventListener('DOMContentLoaded', () => {
             const response = await fetch('/api/groups/list-logs');
             if (!response.ok) {
                  if (response.status !== 404) throw new Error('Failed to fetch logs');
-                 return; // Do nothing if logs just don't exist yet
+                 return;
             }
             const logs = await response.json();
             logFileSelect.innerHTML = '<option value="" disabled selected>Select a log file</option>';
