@@ -247,11 +247,12 @@ window.addEventListener('DOMContentLoaded', () => {
                 const groupName = document.getElementById('groupName').value;
                 const numbers = document.getElementById('manualNumbers').value;
                 const desiredAdminNumber = document.getElementById('desiredAdminNumber').value;
+                const inviteNumbers = document.getElementById('inviteNumbers').value;
 
                 const response = await fetch('/api/groups/create-manual', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ groupName, numbers, desiredAdminNumber }),
+                    body: JSON.stringify({ groupName, numbers, desiredAdminNumber, inviteNumbers }),
                 });
                 const result = await response.json();
                 showToast(result.message, response.ok ? 'success' : 'error');

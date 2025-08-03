@@ -14,15 +14,11 @@ const { writeInviteLog } = require('../utils/inviteLogger');
 const activeClients = {};
 const processingUsers = new Set();
 const batchTrackers = {};
+const initialContactsSyncDone = new Set(); // To track contact sync status
 
 async function startBaileysClient(username, session) {
-    // --- ✅ THE FIX IS HERE ---
-    // This block now correctly handles users who log in when a client is already active.
     if (activeClients[username] && activeClients[username].user) {
         logger.info(`Client for ${username} is already connected and ready.`);
-        
-        // This is the crucial step that was missing:
-        // Even if the client is ready, we must ensure the *current* session has the JID.
         const jid = activeClients[username].user.id;
         if (session && session.user && session.user.jid !== jid) {
             session.user.jid = jid;
@@ -34,7 +30,7 @@ async function startBaileysClient(username, session) {
                 }
             });
         }
-        return; // Exit after ensuring the session is updated.
+        return;
     }
 
     if (activeClients[username]) {
@@ -42,15 +38,33 @@ async function startBaileysClient(username, session) {
         return;
     }
 
-    // This part handles brand-new connections.
     logger.info(`Initializing Baileys client for user: ${username}`);
     const sessionPath = path.join(config.paths.session, username);
     const { state, saveCreds } = await useMultiFileAuthState(sessionPath);
-    
+
     const sock = makeWASocket({ auth: state, browser: Browsers.macOS('Desktop'), logger: pino({ level: 'silent' }) });
     activeClients[username] = sock;
+    sock.contacts = {};
 
     sock.ev.on('creds.update', saveCreds);
+
+    sock.ev.on('contacts.set', ({ contacts }) => {
+        for (const contact of contacts) {
+            sock.contacts[contact.id] = contact;
+        }
+        logger.info(`[User: ${username}] Initial contacts sync complete. Total contacts: ${Object.keys(sock.contacts).length}`);
+        if (!initialContactsSyncDone.has(username)) {
+            initialContactsSyncDone.add(username);
+            logger.info(`[User: ${username}] Triggering queue processing after contact sync.`);
+            processQueueForUser(username);
+        }
+    });
+
+    sock.ev.on('contacts.upsert', (contacts) => {
+        for (const contact of contacts) {
+            sock.contacts[contact.id] = contact;
+        }
+    });
 
     sock.ev.on('connection.update', (update) => {
         const { connection, lastDisconnect, qr } = update;
@@ -59,11 +73,12 @@ async function startBaileysClient(username, session) {
         if (qr && userSocketId) {
             global.io.to(userSocketId).emit('qr', qr);
         }
-        
+
         if (connection === 'close') {
             const shouldReconnect = new Boom(lastDisconnect?.error)?.output?.statusCode !== DisconnectReason.loggedOut;
             logger.error(`Connection for ${username} closed. Reconnecting: ${shouldReconnect}`);
             delete activeClients[username];
+            initialContactsSyncDone.delete(username); // Reset sync status
             if (shouldReconnect) {
                 setTimeout(() => startBaileysClient(username, session), 5000);
             } else {
@@ -76,7 +91,7 @@ async function startBaileysClient(username, session) {
             }
         } else if (connection === 'open') {
             logger.info(`Client for ${username} connected successfully.`);
-            
+
             const jid = sock.user.id;
             if (session && session.user) {
                 session.user.jid = jid;
@@ -89,8 +104,6 @@ async function startBaileysClient(username, session) {
             if (userSocketId) {
                 global.io.to(userSocketId).emit('status', 'Client is ready!');
             }
-            
-            processQueueForUser(username);
         }
     });
 }
@@ -159,7 +172,7 @@ async function processQueueForUser(username) {
             } else {
                 let success = false;
                 try {
-                    await createGroup(client, task.username, task.groupName, task.participants, task.adminJid, task.batchId);
+                    await createGroup(client, task.username, task.groupName, task.participants, task.adminJid, task.batchId, task.inviteOnlyJids);
                     success = true;
                 } catch (error) {
                     logger.error(`Task failed for group "${task.groupName}": ${error.message}`);

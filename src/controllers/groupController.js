@@ -55,7 +55,6 @@ exports.uploadContacts = async (req, res) => {
         let rows = await processAndValidateCsv(filePath);
         fs.unlinkSync(filePath); // Clean up the file after successful processing
         
-        // This filter for empty rows will now work correctly.
         rows = rows.filter(row => Object.values(row).some(val => val && val.trim() !== ''));
         
         const batchId = uuidv4();
@@ -69,17 +68,41 @@ exports.uploadContacts = async (req, res) => {
         let queuedCount = 0;
         for (const [index, row] of rows.entries()) {
             const groupName = `${row.booking_id} - ${row.property_name} - ${row.check_in}`;
-            const participants = [...new Set([row.admin_number, row.sem_number, row.contact].filter(Boolean).map(sanitizePhoneNumber).filter(Boolean))];
             
-            if (participants.length < 2) {
-                // Pass batchId to the log function
-                writeInviteLog(username, groupName, '', 'Failed', `Skipped: Not enough valid members found (${participants.length}).`, batchId);
+            const participantsToInvite = [];
+            if (row['customer_number']) {
+                const sanitizedCustomer = sanitizePhoneNumber(row['customer_number']);
+                if (sanitizedCustomer) {
+                    participantsToInvite.push(sanitizedCustomer);
+                }
+            }
+
+            const directAddParticipants = new Set();
+            // Add all other numbers for direct addition
+            ['admin_number', 'contact', 'guest_number_1', 'guest_number_2'].forEach(key => {
+                if (row[key]) {
+                    const sanitized = sanitizePhoneNumber(row[key]);
+                    if (sanitized) {
+                        directAddParticipants.add(sanitized);
+                    }
+                }
+            });
+
+            // Combine the lists for the task, but we'll handle them differently in groupCreationService
+            const allParticipants = [...Array.from(directAddParticipants), ...participantsToInvite];
+
+            if (allParticipants.length < 2) {
+                writeInviteLog(username, groupName, '', 'Failed', `Skipped: Not enough valid members found (${allParticipants.length}).`, batchId);
                 continue;
             }
             
             queuedCount++;
             taskQueue.addTask({
-                username, groupName, participants, batchId,
+                username, 
+                groupName, 
+                participants: allParticipants, 
+                inviteOnlyJids: participantsToInvite, // Pass the list of invite-only numbers
+                batchId,
                 adminJid: sanitizePhoneNumber(row.admin_number),
                 index: index + 1,
                 total: rows.length,
@@ -104,12 +127,12 @@ exports.uploadContacts = async (req, res) => {
 };
 
 exports.createManualGroup = async (req, res) => {
-    // Check if user exists on the session before destructuring
     if (!req.session.user) {
         return res.status(401).json({ message: 'You are not logged in.' });
     }
-    const { groupName, numbers, desiredAdminNumber } = req.body;
-    const { username, jid: userJid } = req.session.user; // Get username and JID from session
+    // START: Add inviteNumbers to the destructuring
+    const { groupName, numbers, desiredAdminNumber, inviteNumbers } = req.body;
+    const { username, jid: userJid } = req.session.user;
     const sock = getClient(username);
 
     logger.info(`[User: ${username}] Received manual group creation request for group: "${groupName}"`);
@@ -121,17 +144,23 @@ exports.createManualGroup = async (req, res) => {
         logger.error(`[User: ${username}] User JID not found in session. Cannot add creator to group.`);
         return res.status(500).json({ message: 'Could not identify group creator. Please re-login.' });
     }
-    if (!groupName || !numbers) {
-        return res.status(400).json({ message: 'Group name and at least one member\'s number are required.' });
+    // Updated condition to check both number fields
+    if (!groupName || (!numbers && !inviteNumbers)) {
+        return res.status(400).json({ message: 'Group name and at least one participant number are required.' });
     }
 
     try {
-        let participants = numbers.split(/[,\n]/).map(sanitizePhoneNumber).filter(Boolean);
-        participants.push(userJid);
+        // Process direct-add numbers
+        let directAddParticipants = numbers ? numbers.split(/[,\n]/).map(sanitizePhoneNumber).filter(Boolean) : [];
+        directAddParticipants.push(userJid); // Always add the creator
         
-        participants = [...new Set(participants)];
+        // Process invite-only numbers
+        let inviteOnlyParticipants = inviteNumbers ? inviteNumbers.split(/[,\n]/).map(sanitizePhoneNumber).filter(Boolean) : [];
 
-        if (participants.length < 2) {
+        // Combine for validation and task queuing
+        let allParticipants = [...new Set([...directAddParticipants, ...inviteOnlyParticipants])];
+
+        if (allParticipants.length < 2) {
             const reason = 'A group needs at least one valid member besides the creator.';
             logger.warn(`[User: ${username}] Manual group "${groupName}" skipped. ${reason}`);
             writeInviteLog(username, groupName, '', 'Failed', `Skipped: ${reason}`);
@@ -139,12 +168,10 @@ exports.createManualGroup = async (req, res) => {
         }
 
         const adminJid = sanitizePhoneNumber(desiredAdminNumber);
-        
-        // --- ✅ THE FIX IS HERE ✅ ---
-        // 1. Capture the result status from the createGroup service.
-        const resultStatus = await createGroup(sock, username, groupName, participants, adminJid);
 
-        // 2. Send a specific response based on the result.
+        // The createGroup function is already set up to handle this!
+        const resultStatus = await createGroup(sock, username, groupName, allParticipants, adminJid, null, inviteOnlyParticipants);
+
         switch (resultStatus) {
             case 'success':
                 return res.status(200).json({ message: `Group "${groupName}" was created successfully.` });
@@ -153,10 +180,8 @@ exports.createManualGroup = async (req, res) => {
             case 'failed':
                 return res.status(500).json({ message: `Failed to create group "${groupName}". Check logs for details.` });
             default:
-                // Fallback for any unexpected case
                 return res.status(202).json({ message: `Group "${groupName}" creation process initiated.` });
         }
-        // --- End of Fix ---
 
     } catch (error) {
         logger.error(`Manual group creation failed for ${username}:`, error);
