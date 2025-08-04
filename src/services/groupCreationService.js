@@ -98,7 +98,8 @@ async function createGroupWithBaileys(sock, username, groupName, participants, a
         try {
             logger.info(`Sending invite link to non-contact participant: ${jid}`);
             await sock.sendMessage(jid, {
-                text: `Hi! You have been invited to join the group "${groupName}". \n\nPlease join using this link: ${inviteLink}`
+                text:   `Hi! You have been invited to join the group "${groupName}" by Stayvista. \n\nPlease join using this link: ${inviteLink}. 
+                        \n\n Just reply with a "Yes" in case the link is not clickable.`
             });
             logger.info(`Invite link successfully sent to ${jid}`);
             await delay(1000);
