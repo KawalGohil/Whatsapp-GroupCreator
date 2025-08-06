@@ -79,7 +79,7 @@ exports.uploadContacts = async (req, res) => {
 
             const directAddParticipants = new Set();
             // Add all other numbers for direct addition
-            ['admin_number', 'contact', 'guest_number_1', 'guest_number_2'].forEach(key => {
+            ['admin_number', 'contact', 'guest_number_1', 'guest_number_2', 'guest_number_3', 'guest_number_4'].forEach(key => {
                 if (row[key]) {
                     const sanitized = sanitizePhoneNumber(row[key]);
                     if (sanitized) {
