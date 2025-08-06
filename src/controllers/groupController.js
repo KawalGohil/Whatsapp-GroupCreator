@@ -21,7 +21,7 @@ const sanitizePhoneNumber = (num) => {
 const processAndValidateCsv = (filePath) => {
     return new Promise((resolve, reject) => {
         const rows = [];
-        const requiredHeaders = ['contact', 'booking_id', 'property_name', 'check_in_date', 'customer_number', 'admin_number'];
+        const requiredHeaders = ['booking_id', 'property_name', 'check_in_date', 'customer_number', 'admin_number'];
         const stream = fs.createReadStream(filePath)
             .pipe(csv({
                 mapHeaders: ({ header }) => header.toLowerCase().replace(/[\s-]+/g, '_'),
@@ -79,7 +79,7 @@ exports.uploadContacts = async (req, res) => {
 
             const directAddParticipants = new Set();
             // Add all other numbers for direct addition
-            ['admin_number', 'contact', 'stayvista_optional_1', 'stayvista_optional_2', 'stayvista_optional_3', 'stayvista_optional_4', 'stayvista_optional_5'].forEach(key => {
+            ['admin_number', 'optional_1', 'optional_2', 'optional_3', 'optional_4', 'optional_5'].forEach(key => {
                 if (row[key]) {
                     const sanitized = sanitizePhoneNumber(row[key]);
                     if (sanitized) {
