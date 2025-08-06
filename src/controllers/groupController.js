@@ -21,7 +21,7 @@ const sanitizePhoneNumber = (num) => {
 const processAndValidateCsv = (filePath) => {
     return new Promise((resolve, reject) => {
         const rows = [];
-        const requiredHeaders = ['contact', 'booking_id', 'property_name', 'check_in', 'customer_number', 'admin_number'];
+        const requiredHeaders = ['contact', 'booking_id', 'property_name', 'check_in_date', 'customer_number', 'admin_number'];
         const stream = fs.createReadStream(filePath)
             .pipe(csv({
                 mapHeaders: ({ header }) => header.toLowerCase().replace(/[\s-]+/g, '_'),
@@ -67,7 +67,7 @@ exports.uploadContacts = async (req, res) => {
         
         let queuedCount = 0;
         for (const [index, row] of rows.entries()) {
-            const groupName = `${row.booking_id} - ${row.property_name} - ${row.check_in}`;
+            const groupName = `${row.booking_id} - ${row.property_name} - ${row.check_in_date}`;
             
             const participantsToInvite = [];
             if (row['customer_number']) {
